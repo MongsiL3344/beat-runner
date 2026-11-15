@@ -1,0 +1,80 @@
+<svg viewBox="0 0 960 570" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="14">
+  <style>
+    svg { --fg: #1f2328; --muted: #656d76; --border: #d0d7de; --accent: #0969da; --warning: #bf8700; background: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      svg { --fg: #e6edf3; --muted: #9198a1; --border: #3d444d; --accent: #4493f8; --warning: #d29922; background: #0d1117; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker>
+    <marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--warning)"/></marker>
+  </defs>
+
+  <rect x="10" y="10" width="940" height="550" rx="12" fill="none" stroke="var(--border)" stroke-width="2"/>
+  <text x="30" y="38" font-weight="bold" fill="var(--fg)">맥 (호스트)</text>
+
+  <line x1="600" y1="33" x2="640" y2="33" stroke="var(--fg)" stroke-width="2"/>
+  <text x="648" y="38" font-size="12" fill="var(--muted)">동작 확인됨</text>
+  <line x1="740" y1="33" x2="780" y2="33" stroke="var(--warning)" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="788" y="38" font-size="12" fill="var(--muted)">아직 연결 안 됨</text>
+
+  <rect x="40" y="70" width="170" height="60" rx="8" fill="none" stroke="var(--fg)"/>
+  <text x="125" y="105" text-anchor="middle" fill="var(--fg)">주인님 터미널</text>
+
+  <rect x="300" y="70" width="200" height="60" rx="8" fill="none" stroke="var(--fg)"/>
+  <text x="400" y="95" text-anchor="middle" font-weight="bold" fill="var(--fg)">unity CLI</text>
+  <text x="400" y="116" text-anchor="middle" font-size="12" fill="var(--muted)">/opt/homebrew/bin/unity</text>
+
+  <line x1="210" y1="100" x2="298" y2="100" stroke="var(--fg)" stroke-width="2" marker-end="url(#a)"/>
+  <text x="254" y="91" text-anchor="middle" font-size="12" fill="var(--muted)">unity command</text>
+
+  <rect x="600" y="60" width="330" height="160" rx="10" fill="none" stroke="var(--accent)" stroke-width="2"/>
+  <text x="765" y="85" text-anchor="middle" font-weight="bold" fill="var(--fg)">Unity 에디터 (PID 77843)</text>
+  <rect x="620" y="100" width="290" height="70" rx="6" fill="none" stroke="var(--border)"/>
+  <text x="765" y="128" text-anchor="middle" fill="var(--fg)">Pipeline 서버 1.0.0</text>
+  <text x="765" y="150" text-anchor="middle" font-size="13" fill="var(--accent)">127.0.0.1:7800</text>
+  <text x="765" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">에디터와 같이 켜지고 같이 꺼짐</text>
+
+  <path d="M500 100 H560 V135 H618" fill="none" stroke="var(--fg)" stroke-width="2" marker-end="url(#a)"/>
+  <text x="505" y="91" font-size="12" fill="var(--muted)">② HTTP + 토큰</text>
+
+  <rect x="600" y="270" width="330" height="130" rx="10" fill="none" stroke="var(--fg)"/>
+  <text x="765" y="293" text-anchor="middle" font-weight="bold" fill="var(--fg)">프로젝트 폴더</text>
+  <text x="765" y="313" text-anchor="middle" font-size="13" fill="var(--fg)">~/Dev/beat-runner</text>
+  <text x="620" y="343" font-size="12" fill="var(--fg)">Assets/ · C# 스크립트, 씬</text>
+  <text x="620" y="365" font-size="12" fill="var(--fg)">Library/Pipeline/.unity-pipeline-port</text>
+  <text x="620" y="385" font-size="12" fill="var(--muted)">  → 포트 번호와 인증 토큰</text>
+
+  <line x1="765" y1="222" x2="765" y2="268" stroke="var(--fg)" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="775" y="250" font-size="12" fill="var(--muted)">읽기 · 기록</text>
+
+  <line x1="480" y1="132" x2="598" y2="362" stroke="var(--fg)" stroke-width="2" marker-end="url(#a)"/>
+  <text x="530" y="252" text-anchor="end" font-size="12" fill="var(--muted)">① 포트·토큰 읽기</text>
+
+  <rect x="300" y="270" width="200" height="60" rx="8" fill="none" stroke="var(--warning)" stroke-dasharray="6 4"/>
+  <text x="400" y="295" text-anchor="middle" fill="var(--fg)">원격 로그인 (sshd)</text>
+  <text x="400" y="316" text-anchor="middle" font-size="12" fill="var(--warning)">:22 · 지금 꺼짐</text>
+
+  <line x1="400" y1="270" x2="400" y2="134" stroke="var(--warning)" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#w)"/>
+  <text x="410" y="200" font-size="12" fill="var(--muted)">unity 명령 실행</text>
+
+  <rect x="40" y="420" width="600" height="120" rx="10" fill="none" stroke="var(--muted)" stroke-dasharray="4 4"/>
+  <text x="60" y="445" font-size="13" font-weight="bold" fill="var(--fg)">Docker 컨테이너 (새 에이전트 세션)</text>
+
+  <rect x="70" y="460" width="180" height="60" rx="8" fill="none" stroke="var(--fg)"/>
+  <text x="160" y="495" text-anchor="middle" fill="var(--fg)">ssh 클라이언트</text>
+
+  <rect x="330" y="460" width="200" height="60" rx="8" fill="none" stroke="var(--accent)" stroke-width="2"/>
+  <text x="430" y="487" text-anchor="middle" font-weight="bold" fill="var(--fg)">에이전트 (omp)</text>
+  <text x="430" y="507" text-anchor="middle" font-size="12" fill="var(--muted)">코드 작성 · 판단</text>
+
+  <line x1="330" y1="490" x2="252" y2="490" stroke="var(--fg)" stroke-width="2" marker-end="url(#a)"/>
+  <text x="291" y="482" text-anchor="middle" font-size="12" fill="var(--muted)">unity 명령</text>
+
+  <path d="M160 460 V300 H298" fill="none" stroke="var(--warning)" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#w)"/>
+  <text x="170" y="380" font-size="12" fill="var(--muted)">SSH 접속</text>
+  <text x="170" y="396" font-size="12" fill="var(--muted)">host.docker.internal:22</text>
+
+  <path d="M530 490 H765 V402" fill="none" stroke="var(--fg)" stroke-width="2" marker-end="url(#a)"/>
+  <text x="650" y="482" font-size="12" fill="var(--muted)">파일 직접 수정 (폴더 마운트)</text>
+</svg>

@@ -49,5 +49,8 @@ ExportedObj/
 sysinfo.txt
 crashlytics-build.properties
 
+# 대회 제출용 파일
+/docs/submission/
+
 # macOS
 .DS_Store

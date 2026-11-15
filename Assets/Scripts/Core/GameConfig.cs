@@ -54,6 +54,19 @@ namespace NoiseRun
         public const float AnalysisProgressBpmEnd = 0.95f;
         /// <summary>FFT 루프에서 진행률을 갱신하는 프레임 간격(volatile 쓰기 빈도 제한용).</summary>
         public const int AnalysisProgressFrameInterval = 64;
+        /// <summary>5.6 A: 칸 시각에서 ±(이 비율 × 반박자) 안의 온셋만 그 칸으로 인정한다(사용자 결정 0.15. 112 BPM에서 ±40ms).</summary>
+        public const double SlotOnsetWindowRatio = 0.15;
+        /// <summary>5.6 B: 후보 칸 중 절대 에너지 상위 이 비율만 남긴다(사용자 결정 0.8). 어려움 = 이 후보 전부.</summary>
+        public const double CandidateEnergyRatio = 0.8;
+        /// <summary>HPSS 화성 성분: 시간 방향 미디언 길이(프레임, 홀수). 31 ≈ 0.36초(44.1kHz). 사용자 결정.</summary>
+        public const int HpssHarmonicFrames = 31;
+        /// <summary>HPSS 타악기 성분: 주파수 방향 미디언 길이(bin, 홀수). 31 ≈ 1.3kHz(44.1kHz). 사용자 결정.</summary>
+        public const int HpssPercussiveBins = 31;
+        /// <summary>곡 전체 타악기 비중 ΣP²/Σ(P²+H²)(저음 하한~고음 상한)이 이 값 이상이면 타악기 플럭스로 분석, 미만이면 원음 플럭스(드럼이 거의 없는 곡).
+        /// 측정: 드럼 곡 0.200·0.217, 합성 지속음 0.047~0.076 → 로그 가운데 약 0.12(사용자가 정한 방식).</summary>
+        public const float PercussiveRatioMin = 0.12f;
+        /// <summary>타악기 모드의 적응 임계값 배수(원음 모드는 ThresholdMultiplier). 1.5면 잔여 출렁임까지 초당 약 31개가 잡혀서 사용자 결정으로 4.5(두 곡 6.5~8.7개/초).</summary>
+        public const float PercussiveThresholdMultiplier = 4.5f;
         /// <summary>5.7 난이도별로 남길 후보 칸 비율.</summary>
         public const double DifficultyNoteRatioEasy = 0.4;
         public const double DifficultyNoteRatioNormal = 0.7;

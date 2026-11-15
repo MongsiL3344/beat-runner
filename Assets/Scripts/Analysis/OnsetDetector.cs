@@ -4,7 +4,8 @@ using System.Collections.Generic;
 namespace NoiseRun
 {
     /// <summary>
-    /// 모노 믹스다운, 대역별 스펙트럴 플럭스, 적응 임계값 피크 검출(구현명세 5.2–5.4).
+    /// 모노 믹스다운, 대역별 스펙트럴 플럭스(원음·HPSS 타악기), 적응 임계값 피크 검출(구현명세 5.2–5.4).
+    /// 곡 전체 타악기 비중이 PercussiveRatioMin 이상이면 타악기 플럭스를, 미만이면 원음 플럭스를 쓴다.
     /// 워커 스레드에서 돌므로 Unity API를 부르지 않는다.
     /// </summary>
     public static class OnsetDetector
@@ -62,16 +63,18 @@ namespace NoiseRun
             int m = FrameCount(mono.Length);
             double hopSec = (double)hop / sampleRate;
 
-            var flux = new float[BandCount][];
+            var mixFlux = new float[BandCount][];
+            var percFlux = new float[BandCount][];
             var thr = new float[BandCount][];
             for (int b = 0; b < BandCount; b++)
             {
-                flux[b] = new float[m];
+                mixFlux[b] = new float[m];
+                percFlux[b] = new float[m];
                 thr[b] = new float[m];
             }
             var result = new OnsetResult
             {
-                bandFlux = flux,
+                bandFlux = mixFlux,
                 bandThreshold = thr,
                 strengthCurve = new float[m],
                 onsets = new List<Onset>(),
@@ -87,7 +90,7 @@ namespace NoiseRun
             SetBand(kLo, kHi, (int)Band.Mid, GameConfig.MidBandHzMin, GameConfig.MidBandHzMax, sampleRate, half);
             SetBand(kLo, kHi, (int)Band.High, GameConfig.HighBandHzMin, GameConfig.HighBandHzMax, sampleRate, half);
 
-            // ── FFT·플럭스(0.05–0.80) ──
+            // ── FFT·원음 플럭스·HPSS 타악기 플럭스(0.05–0.80) ──
             if (progress != null)
             {
                 progress.stage = FluxStage;
@@ -99,6 +102,7 @@ namespace NoiseRun
             var im = new float[n];
             var mag = new float[half + 1];
             var prevMag = new float[half + 1];
+            var hpss = new Hpss(m, half, kLo, kHi, percFlux);
 
             for (int f = 0; f < m; f++)
             {
@@ -120,8 +124,9 @@ namespace NoiseRun
                         float d = mag[k] - prevMag[k];
                         if (d > 0f) sum += d;
                     }
-                    flux[b][f] = sum;
+                    mixFlux[b][f] = sum;
                 }
+                hpss.Push(mag);
 
                 // 다음 프레임의 prevMag = 이번 mag(배열 교체)
                 float[] swap = prevMag;
@@ -132,6 +137,13 @@ namespace NoiseRun
                     progress.value = GameConfig.AnalysisProgressMonoEnd
                         + (GameConfig.AnalysisProgressFluxEnd - GameConfig.AnalysisProgressMonoEnd) * f / m;
             }
+            hpss.Flush();
+
+            // 드럼이 거의 없는 곡(타악기 비중 < PercussiveRatioMin)은 원음 플럭스로 되돌린다
+            result.percussiveRatio = (float)hpss.Ratio;
+            result.percussive = result.percussiveRatio >= GameConfig.PercussiveRatioMin;
+            float[][] flux = result.percussive ? percFlux : mixFlux;
+            result.bandFlux = flux;
 
             // ── 적응 임계값·피크(0.80–0.85) + 강도 곡선 ──
             if (progress != null)
@@ -140,6 +152,8 @@ namespace NoiseRun
                 progress.value = GameConfig.AnalysisProgressFluxEnd;
             }
             int w = (int)Math.Round(GameConfig.ThresholdHalfWindowSec / hopSec);
+            // 타악기 플럭스는 지속음을 걷어 내도 잔여 출렁임이 상대 기준 피크로 잡히므로 배수를 따로 둔다
+            double multiplier = result.percussive ? GameConfig.PercussiveThresholdMultiplier : GameConfig.ThresholdMultiplier;
             var prefix = new double[m + 1];
             var curve = result.strengthCurve;
 
@@ -158,7 +172,7 @@ namespace NoiseRun
                     int lo = i - w < 0 ? 0 : i - w;
                     int hi = i + w > m - 1 ? m - 1 : i + w;
                     double mean = (prefix[hi + 1] - prefix[lo]) / (hi - lo + 1);
-                    float t = (float)(mean * GameConfig.ThresholdMultiplier);
+                    float t = (float)(mean * multiplier);
                     th[i] = t < floor ? floor : t;
                 }
 
@@ -204,6 +218,202 @@ namespace NoiseRun
             int hi = (int)Math.Floor(fHi * GameConfig.FftSize / sampleRate);
             kLo[band] = lo;
             kHi[band] = hi > half ? half : hi;
+        }
+
+        /// <summary>
+        /// HPSS(5.3): 화성 H = 시간 방향 미디언(HpssHarmonicFrames), 타악기 P = 주파수 방향 미디언(HpssPercussiveBins),
+        /// 타악기 크기 = mag × P²/(P²+H²)(소프트 마스크, P²+H² = 0이면 0). 그 크기로 대역 플럭스를 만든다.
+        /// 시간 미디언은 중심 프레임 뒤 반폭이 필요해서 반폭 프레임만큼 늦게 확정한다. 링 버퍼만 두고 전체 스펙트로그램은 저장하지 않는다.
+        /// 미디언 창은 배열 경계(프레임 0..M−1, bin 0..N/2)에서 자른다.
+        /// </summary>
+        sealed class Hpss
+        {
+            readonly int frameCount;
+            readonly int half;
+            readonly int binCount;
+            readonly int timeLen;
+            readonly int timeHalf;
+            readonly int freqHalf;
+            readonly int[] kLo;
+            readonly int[] kHi;
+            readonly int ratioLo;
+            readonly float[][] flux;
+            readonly float[][] ringMag;
+            readonly float[][] ringPerc;
+            readonly SortedWindow[] timeWindow;
+            readonly SortedWindow freqWindow;
+            float[] percMag;
+            float[] prevPercMag;
+            int pushed;
+            int finalized;
+            double sumPerc;
+            double sumAll;
+
+            /// <summary>flux[b]는 길이 frameCount. 타악기 비중은 bin kLo[Low]..max(kHi)에서 잰다.</summary>
+            public Hpss(int frameCount, int half, int[] kLo, int[] kHi, float[][] flux)
+            {
+                this.frameCount = frameCount;
+                this.half = half;
+                this.kLo = kLo;
+                this.kHi = kHi;
+                this.flux = flux;
+                int top = 0;
+                for (int b = 0; b < kHi.Length; b++) if (kHi[b] > top) top = kHi[b];
+                binCount = top + 1;
+                ratioLo = kLo[(int)Band.Low];
+                timeLen = GameConfig.HpssHarmonicFrames;
+                timeHalf = timeLen / 2;
+                freqHalf = GameConfig.HpssPercussiveBins / 2;
+
+                ringMag = new float[timeLen][];
+                ringPerc = new float[timeLen][];
+                for (int i = 0; i < timeLen; i++)
+                {
+                    ringMag[i] = new float[binCount];
+                    ringPerc[i] = new float[binCount];
+                }
+                timeWindow = new SortedWindow[binCount];
+                for (int k = 0; k < binCount; k++) timeWindow[k] = new SortedWindow(timeLen);
+                freqWindow = new SortedWindow(2 * freqHalf + 1);
+                percMag = new float[binCount];
+                prevPercMag = new float[binCount];
+            }
+
+            /// <summary>곡 전체 ΣP²/Σ(P²+H²). Flush 뒤에 읽는다.</summary>
+            public double Ratio => sumAll > 0.0 ? sumPerc / sumAll : 0.0;
+
+            /// <summary>프레임 하나의 크기 스펙트럼(0..half)을 넣는다. 반폭 전 프레임이 확정된다. mag는 복사하므로 호출자가 다시 써도 된다.</summary>
+            public void Push(float[] mag)
+            {
+                int f = pushed++;
+                int slot = f % timeLen;
+                float[] rm = ringMag[slot];
+                float[] rp = ringPerc[slot];
+
+                // 링에서 밀려나는 프레임 f − timeLen을 시간 창에서 뺀다
+                if (f >= timeLen)
+                    for (int k = 0; k < binCount; k++) timeWindow[k].Remove(rm[k]);
+
+                // 주파수 방향 미디언: bin k 창 = [k − freqHalf, k + freqHalf] ∩ [0, half]
+                freqWindow.Clear();
+                int first = Math.Min(half, freqHalf);
+                for (int k = 0; k <= first; k++) freqWindow.Insert(mag[k]);
+                for (int k = 0; k < binCount; k++)
+                {
+                    rp[k] = freqWindow.Median();
+                    if (k + 1 == binCount) break;
+                    int add = k + 1 + freqHalf;
+                    int drop = k - freqHalf;
+                    if (drop >= 0) freqWindow.Remove(mag[drop]); // 먼저 빼야 용량(2·freqHalf+1)을 넘지 않는다
+                    if (add <= half) freqWindow.Insert(mag[add]);
+                }
+
+                for (int k = 0; k < binCount; k++)
+                {
+                    rm[k] = mag[k];
+                    timeWindow[k].Insert(mag[k]);
+                }
+
+                // 시간 창이 [f − 2·timeHalf, f]이면 중심 프레임 f − timeHalf가 확정된다
+                if (f >= timeHalf) Finalize(f - timeHalf);
+            }
+
+            /// <summary>모든 프레임을 넣은 뒤 남은 끝 프레임(창이 뒤쪽에서 잘림)을 확정한다.</summary>
+            public void Flush()
+            {
+                for (int c = finalized; c < frameCount; c++)
+                {
+                    // 이 프레임 창에서 빠지는 c − timeHalf − 1. Push 단계에서는 아직 빠지지 않았고 링에 남아 있다
+                    int drop = c - timeHalf - 1;
+                    if (drop >= 0)
+                    {
+                        float[] rm = ringMag[drop % timeLen];
+                        for (int k = 0; k < binCount; k++) timeWindow[k].Remove(rm[k]);
+                    }
+                    Finalize(c);
+                }
+            }
+
+            void Finalize(int c)
+            {
+                int slot = c % timeLen;
+                float[] rm = ringMag[slot];
+                float[] rp = ringPerc[slot];
+                for (int k = 0; k < binCount; k++)
+                {
+                    double p = rp[k];
+                    double h = timeWindow[k].Median();
+                    double p2 = p * p;
+                    double total = p2 + h * h;
+                    if (k >= ratioLo)
+                    {
+                        sumPerc += p2;
+                        sumAll += total;
+                    }
+                    percMag[k] = total > 0.0 ? (float)(rm[k] * p2 / total) : 0f;
+                }
+
+                for (int b = 0; b < flux.Length; b++)
+                {
+                    float sum = 0f;
+                    for (int k = kLo[b]; k <= kHi[b]; k++)
+                    {
+                        float d = percMag[k] - prevPercMag[k];
+                        if (d > 0f) sum += d;
+                    }
+                    flux[b][c] = sum;
+                }
+
+                float[] swap = prevPercMag;
+                prevPercMag = percMag;
+                percMag = swap;
+                finalized = c + 1;
+            }
+        }
+
+        /// <summary>정렬된 고정 용량 창(미디언용). 삽입·삭제 O(용량). 순서는 float.CompareTo(NaN이 가장 작음)로 BinarySearch와 맞춘다.</summary>
+        sealed class SortedWindow
+        {
+            readonly float[] values;
+            int count;
+
+            public SortedWindow(int capacity)
+            {
+                values = new float[capacity];
+            }
+
+            public void Clear()
+            {
+                count = 0;
+            }
+
+            public void Insert(float x)
+            {
+                int i = count;
+                while (i > 0 && values[i - 1].CompareTo(x) > 0)
+                {
+                    values[i] = values[i - 1];
+                    i--;
+                }
+                values[i] = x;
+                count++;
+            }
+
+            /// <summary>같은 값 하나를 뺀다. 넣은 적 없는 값이면 InvalidOperationException(호출 순서 버그).</summary>
+            public void Remove(float x)
+            {
+                int i = Array.BinarySearch(values, 0, count, x);
+                if (i < 0) throw new InvalidOperationException("SortedWindow: 없는 값 제거");
+                Array.Copy(values, i + 1, values, i, count - i - 1);
+                count--;
+            }
+
+            /// <summary>개수가 짝수면 가운데 두 값의 평균. 비어 있으면 호출하지 않는다.</summary>
+            public float Median()
+            {
+                int mid = count >> 1;
+                return (count & 1) == 1 ? values[mid] : 0.5f * (values[mid - 1] + values[mid]);
+            }
         }
     }
 }

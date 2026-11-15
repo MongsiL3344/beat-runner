@@ -58,6 +58,10 @@ namespace NoiseRun
         public float[] strengthCurve;
         public List<Onset> onsets;
         public double hopSec;
+        /// <summary>HPSS 타악기 플럭스로 분석했으면 true, 원음 플럭스(드럼이 거의 없는 곡)면 false.</summary>
+        public bool percussive;
+        /// <summary>곡 전체 타악기 비중 ΣP²/Σ(P²+H²)(5.3). 프레임이 없으면 0.</summary>
+        public float percussiveRatio;
     }
 
     public sealed class BpmResult

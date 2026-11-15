@@ -32,8 +32,9 @@ namespace NoiseRun.Tests
         /// <summary>Longest allowed gap between two main-thread frames while the worker analyzes (generous: CI jitter, GC, editor hiccups).</summary>
         const float MaxFrameGapSec = 0.25f;
         const int MinFramesDuringAnalysis = 2;
-        /// <summary>Share of the expected note slots that must actually become notes (clicks are exact, so nearly all of them should).</summary>
-        const double MinNoteFraction = 0.8;
+        /// <summary>Share of the expected note slots that must actually become notes (clicks are exact, so nearly all of them should).
+        /// Hard keeps only the top CandidateEnergyRatio of the slots by energy (spec 5.6 B), so expectations are scaled by it.</summary>
+        const double MinNoteFraction = 0.8 * GameConfig.CandidateEnergyRatio;
         const int StereoChannels = 2;
 
         // synthetic strength curves for the estimator unit tests
@@ -464,7 +465,7 @@ namespace NoiseRun.Tests
         }
 
         [UnityTest]
-        public IEnumerator Difficulty_SelectsStrongestCandidatesAsNestedSubsets()
+        public IEnumerator Difficulty_KeepsOnBeatsFirstThenStrongest_AsNestedSubsets()
         {
             double period = 60.0 / 120f;
             float[] mono = TestAudio.ClickTrack(SampleRate, TrackSeconds, 120f, period * FirstBeatFraction, Band.Low, Band.High);
@@ -474,8 +475,6 @@ namespace NoiseRun.Tests
 
             List<BeatMapGenerator.NoteCandidate> candidates = BeatMapGenerator.Candidates(a.onsets, a.bpm, a.map.songLength);
             Assert.Greater(candidates.Count, 0);
-            var scoreBySlot = new Dictionary<int, double>();
-            foreach (var c in candidates) scoreBySlot[c.slotIndex] = c.score;
 
             BeatMap easy = BeatMapGenerator.Generate(a.onsets, a.bpm, a.map.songLength, Difficulty.Easy);
             BeatMap normal = BeatMapGenerator.Generate(a.onsets, a.bpm, a.map.songLength, Difficulty.Normal);
@@ -491,13 +490,80 @@ namespace NoiseRun.Tests
             Assert.Less(easy.notes.Count, normal.notes.Count);
             Assert.Less(normal.notes.Count, hard.notes.Count);
 
-            AssertKeptAreStrongest(easy, candidates, scoreBySlot);
-            AssertKeptAreStrongest(normal, candidates, scoreBySlot);
+            AssertOnBeatsFirstThenStrongest(easy, candidates);
+            AssertOnBeatsFirstThenStrongest(normal, candidates);
             AssertSlotSubset(easy, normal);
             AssertSlotSubset(normal, hard);
 
             for (int i = 0; i < hard.notes.Count; i++)
                 Assert.AreEqual(candidates[i].slotIndex, hard.notes[i].slotIndex);
+        }
+
+        // ---------------------------------------------------------------- candidates (spec 5.6 A, B)
+
+        const float HandBpm = 120f;
+        const int HandSampleRate = 44100;
+        const double HandSongLength = 20.0;
+        const int HandFirstSlot = 20;     // 5 s at 120 BPM (half beat 0.25 s), past the lead-in
+        const float HandFluxPeak = 10f;
+
+        static double HandHalfBeat => 30.0 / HandBpm;
+        static double HandHopSec => (double)GameConfig.HopSize / HandSampleRate;
+
+        /// <summary>Hand-built analysis result: one Low onset per entry (slot, offset in half beats, flux peak), flux 0 elsewhere.</summary>
+        static OnsetResult HandOnsets(params (int slot, double offsetHalfBeats, float peak)[] hits)
+        {
+            int frames = (int)(HandSongLength / HandHopSec);
+            var flux = new float[3][];
+            for (int b = 0; b < flux.Length; b++) flux[b] = new float[frames];
+            var onsets = new List<Onset>();
+            foreach (var h in hits)
+            {
+                double t = (h.slot + h.offsetHalfBeats) * HandHalfBeat;
+                int m = (int)Math.Round((t * HandSampleRate - GameConfig.FftSize / 2.0) / GameConfig.HopSize);
+                flux[(int)Band.Low][m] = h.peak;
+                onsets.Add(new Onset { time = OnsetDetector.FrameTime(m, HandSampleRate), band = Band.Low, strength = 2f });
+            }
+            return new OnsetResult { bandFlux = flux, onsets = onsets, hopSec = HandHopSec, strengthCurve = new float[frames] };
+        }
+
+        static BpmResult HandBpmResult => new BpmResult { bpm = HandBpm, firstBeatTime = 0.0, confidence = 1f };
+
+        [Test]
+        public void Candidates_IgnoreOnsetsOutsideTheSlotWindow()
+        {
+            double inside = GameConfig.SlotOnsetWindowRatio * 0.5;  // half the window: counts
+            double outside = GameConfig.SlotOnsetWindowRatio * 2.0; // twice the window: must not be pulled onto the slot
+            var hits = new List<(int, double, float)>();
+            var allowed = new HashSet<int>();
+            for (int i = 0; i < 10; i++)
+            {
+                int slot = HandFirstSlot + 3 * i;
+                hits.Add((slot, 0.0, HandFluxPeak)); allowed.Add(slot);
+                hits.Add((slot + 1, inside, HandFluxPeak)); allowed.Add(slot + 1);
+                hits.Add((slot + 2, outside, HandFluxPeak));
+            }
+
+            List<BeatMapGenerator.NoteCandidate> c = BeatMapGenerator.Candidates(HandOnsets(hits.ToArray()), HandBpmResult, HandSongLength);
+
+            foreach (var x in c)
+                Assert.IsTrue(allowed.Contains(x.slotIndex), "slot " + x.slotIndex + " only has an onset outside the window");
+            Assert.AreEqual((int)Math.Round(GameConfig.CandidateEnergyRatio * allowed.Count, MidpointRounding.AwayFromZero), c.Count);
+        }
+
+        [Test]
+        public void Candidates_KeepTheLoudestSlotsByEnergy()
+        {
+            const int count = 10;
+            var hits = new (int, double, float)[count];
+            for (int i = 0; i < count; i++) hits[i] = (HandFirstSlot + i, 0.0, i + 1f); // slot energy grows with the index
+
+            List<BeatMapGenerator.NoteCandidate> c = BeatMapGenerator.Candidates(HandOnsets(hits), HandBpmResult, HandSongLength);
+
+            int keep = (int)Math.Round(GameConfig.CandidateEnergyRatio * count, MidpointRounding.AwayFromZero);
+            Assert.AreEqual(keep, c.Count);
+            for (int i = 0; i < keep; i++)
+                Assert.AreEqual(HandFirstSlot + count - keep + i, c[i].slotIndex, "the quietest slots must be the ones dropped");
         }
 
         static void AssertSlotSubset(BeatMap smaller, BeatMap larger)
@@ -508,21 +574,34 @@ namespace NoiseRun.Tests
                 Assert.IsTrue(slots.Contains(n.slotIndex), smaller.difficulty + " slot " + n.slotIndex + " missing from " + larger.difficulty);
         }
 
-        static void AssertKeptAreStrongest(BeatMap map, List<BeatMapGenerator.NoteCandidate> candidates, Dictionary<int, double> scoreBySlot)
+        /// <summary>Spec 5.7 D: on-beat candidates go before off-beat ones; inside each group the stronger score wins.</summary>
+        static void AssertOnBeatsFirstThenStrongest(BeatMap map, List<BeatMapGenerator.NoteCandidate> candidates)
         {
             var kept = new HashSet<int>();
-            double minKept = double.MaxValue;
             int prev = int.MinValue;
             foreach (Note n in map.notes)
             {
                 Assert.Greater(n.slotIndex, prev, "notes must be in ascending slot order");
                 prev = n.slotIndex;
                 kept.Add(n.slotIndex);
-                minKept = Math.Min(minKept, scoreBySlot[n.slotIndex]);
+            }
+
+            bool anyOffBeatKept = false;
+            var minKept = new[] { double.MaxValue, double.MaxValue }; // [off-beat, on-beat]
+            foreach (var c in candidates)
+            {
+                if (!kept.Contains(c.slotIndex)) continue;
+                if (!c.OnBeat) anyOffBeatKept = true;
+                int g = c.OnBeat ? 1 : 0;
+                minKept[g] = Math.Min(minKept[g], c.score);
             }
             foreach (var c in candidates)
-                if (!kept.Contains(c.slotIndex))
-                    Assert.LessOrEqual(c.score, minKept, map.difficulty + ": dropped slot " + c.slotIndex + " outscores a kept note");
+            {
+                if (kept.Contains(c.slotIndex)) continue;
+                if (c.OnBeat)
+                    Assert.IsFalse(anyOffBeatKept, map.difficulty + ": on-beat slot " + c.slotIndex + " dropped while an off-beat slot was kept");
+                Assert.LessOrEqual(c.score, minKept[c.OnBeat ? 1 : 0], map.difficulty + ": dropped slot " + c.slotIndex + " outscores a kept slot of its group");
+            }
         }
     }
 }

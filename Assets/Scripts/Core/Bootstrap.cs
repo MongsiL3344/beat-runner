@@ -51,6 +51,18 @@ namespace NoiseRun
                 b.Conductor.FrozenSongTime = freezeAt;
             }
 
+#if UNITY_EDITOR
+            // 갤러리가 켜져 있으면 메뉴를 숨기고 스프라이트를 나열한다. 파일 자동 시작은 하지 않는다.
+            // Flow를 꺼서 보이지 않는 메뉴가 Enter 등 입력으로 넘어가지 않게 한다.
+            if (DevOptions.Gallery)
+            {
+                b.Canvas.gameObject.SetActive(false);
+                b.Flow.enabled = false;
+                SpriteGallery.Create(b.transform);
+                return;
+            }
+#endif
+
             string file = DevOptions.AutoFile;
             if (!string.IsNullOrEmpty(file)) b.Flow.StartFromFile(file);
         }

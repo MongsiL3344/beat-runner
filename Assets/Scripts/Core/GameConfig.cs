@@ -146,5 +146,23 @@ namespace NoiseRun
         public static readonly Color DebugPlayheadColor = new Color(1f, 0.9f, 0.2f, 1f);
         public static readonly Color DebugBlinkOnColor = new Color(1f, 0.9f, 0.2f, 1f);
         public static readonly Color DebugBlinkOffColor = new Color(0.25f, 0.25f, 0.2f, 1f);
+
+        // ── 도트 스프라이트·갤러리 (T4, 7.3·9절) ──
+        /// <summary>달리기 프레임 속도(fps, 7.3).</summary>
+        public const float RunAnimFps = 12f;
+        /// <summary>갤러리에서 달리기가 아닌 애니메이션(점프·음파·휘두르기)의 프레임 속도. 프레임이 보이도록 느리게.</summary>
+        public const float GalleryAnimFps = 4f;
+        /// <summary>갤러리 배치 단위는 480×270 기준 픽셀. 화면 가장자리 여백.</summary>
+        public const int GalleryMarginPx = 8;
+        /// <summary>같은 그룹의 프레임 사이 간격.</summary>
+        public const int GalleryFrameGapPx = 4;
+        /// <summary>그룹 사이 간격.</summary>
+        public const int GalleryGroupGapPx = 12;
+        /// <summary>줄 사이 간격.</summary>
+        public const int GalleryLineGapPx = 8;
+        /// <summary>어두운 외곽선(k)과 밝은 색(w)이 모두 보이도록 중간 회색.</summary>
+        public static readonly Color GalleryBackgroundColor = new Color(0.5f, 0.5f, 0.5f, 1f);
+        /// <summary>배경이 스프라이트 뒤에 오도록 하는 정렬 순서.</summary>
+        public const int GalleryBackgroundSortingOrder = -10;
     }
 }

@@ -2,6 +2,11 @@
 
 이 파일은 Unity 프로젝트 루트(맥 `~/Dev/beat-runner`)에 둔다. 게임 기획·구현 명세는 `docs/기획서.md`, `docs/구현명세.md`를 따른다.
 
+## 작업 진행 기록
+
+- 세션을 시작하면 먼저 `docs/작업체크리스트.md`를 읽고, "지금 할 일"과 "다음 작업에 넘길 메모"를 확인한 뒤 작업한다.
+- 작업(T1~T15)이 끝나면 같은 파일을 갱신한다: 진행표 체크, "지금 할 일"을 다음 작업으로 변경, 기능 ID 상태 갱신, 다음 작업에 필요한 메모(주의점, 위험, 임시로 바꿔 둔 것) 추가. 사람 확인이 필요한 작업은 사용자의 확인 답을 받은 뒤에 체크한다.
+
 ## 환경
 
 - 에이전트는 Docker 컨테이너 안에서 동작한다. Unity Editor와 Unity CLI는 호스트 맥에 있다.
@@ -14,6 +19,42 @@
 |---|---|
 | C# 코드, `docs/`, `Packages/manifest.json` 등 파일 수정 | 컨테이너에서 마운트된 프로젝트 폴더를 직접 수정. SSH로 맥에서 파일을 편집하지 않는다. |
 | Editor 조작(상태 확인, 재컴파일, 콘솔, 플레이 모드, 스크린샷, 빌드) | SSH로 맥에서 `unity` 명령 실행 |
+
+## 디렉터리 구조
+
+기준은 `docs/구현명세.md` 4.2절(스크립트 목록)과 4.6절(어셈블리)이다. 새 파일은 명세 표에 적힌 경로에 만들고, 표에 없는 파일은 아래 규칙으로 위치를 정한다.
+
+```
+Assets/
+├── Scripts/                      게임 코드 전체. NoiseRun.Runtime.asmdef (rootNamespace NoiseRun)
+│   ├── Core/                     Bootstrap, GameFlow, GameConfig, DevOptions, SaveData
+│   ├── Audio/                    FilePicker, AudioLoader, Conductor, ISongClock, SyncCalibration, SfxPlayer
+│   ├── Analysis/                 Fft, OnsetDetector, BpmEstimator, BeatMapGenerator, BeatMap
+│   ├── Gameplay/                 RhythmJudge, PlayerController, ChaserController, LevelBuilder
+│   ├── View/                     UiFactory, CameraDirector, BeatBarUI, Hud, MenuScreens, ResultScreen, AnalysisDebugView
+│   └── Art/                      PixelArt, SpriteData, SpriteAnimator
+├── Tests/PlayMode/               NoiseRun.Tests.PlayMode.asmdef (rootNamespace NoiseRun.Tests)
+│   ├── *Tests.cs                 테스트 파일은 이 폴더 바로 아래에 평평하게 둔다
+│   ├── TestSupport/              테스트 헬퍼(TestAudio 등). 테스트 메서드는 두지 않는다
+│   └── TestData/                 코드로 만들 수 없는 고정 입력 파일(ffmpeg로 변환한 mp3·ogg 등)
+├── StandaloneFileBrowser/        외부 라이브러리 원본. 자체 asmdef. 수정하지 않는다
+├── Plugins/NLayer/               (mp3 폴백이 필요할 때만) NLayer 소스 + NLayer.asmdef
+├── Resources/Fonts/              Resources.Load로 읽는 폰트와 라이선스 파일
+├── Scenes/                       SampleScene 하나만 쓴다
+└── Settings/                     URP 템플릿 기본 설정. 건드리지 않는다
+```
+
+규칙
+
+- **네임스페이스**: `Scripts/` 아래는 하위 폴더와 상관없이 모두 `namespace NoiseRun`, 테스트는 모두 `namespace NoiseRun.Tests`. 폴더별 네임스페이스(`NoiseRun.Audio` 등)를 만들지 않는다.
+- **폴더 선택**: 클래스 하나는 4.2절의 역할(Core=시작·흐름·설정, Audio=파일·재생·시간, Analysis=분석·맵 데이터, Gameplay=판정·캐릭터·레벨, View=카메라·UI, Art=스프라이트 생성)로 폴더를 정한다. 새 최상위 폴더나 하위 폴더를 만들어야 하면 먼저 사용자에게 묻는다.
+- **새 asmdef 금지**: 게임 코드는 `NoiseRun.Runtime` 하나로 묶는다. 외부 라이브러리를 추가할 때만 그 폴더에 asmdef를 두고 `NoiseRun.Runtime`의 references에 넣는다.
+- **Editor 전용 코드**: 별도 `Editor/` 폴더를 만들지 않고 `#if UNITY_EDITOR`로 감싼다(`DevOptions` 방식). 에디터 확장이 꼭 필요해지면 먼저 사용자에게 묻는다.
+- **에셋**: 스프라이트·효과음은 코드로 만들므로 이미지·사운드 에셋 폴더를 두지 않는다. `Resources/`에는 런타임에 이름으로 읽어야 하는 파일만 넣는다.
+- **테스트 데이터**: 테스트 음원은 `TestSupport/TestAudio.cs`로 만드는 것이 기본이다. `TestData/`에는 코드로 만들 수 없는 파일만 넣고, 크기는 짧게(수 초) 유지한다.
+- **임시 파일**: 테스트·검증 중 생기는 파일(wav, 스크린샷, `noiserun_dev.txt`)은 프로젝트의 `Temp/` 아래에만 쓴다. 테스트는 `Temp/noiserun_tests/`를 쓴다. `Temp/`는 git에서 제외된다.
+- **문서**: 기획·명세·다이어그램은 `docs/`에 둔다.
+- **.meta**: `Assets/` 아래 파일·폴더를 만들거나 옮기면 `.meta`도 함께 커밋한다. 옮길 때는 `.meta`도 같이 옮겨 GUID를 유지한다.
 
 ## 명령 형식
 

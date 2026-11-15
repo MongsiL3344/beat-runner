@@ -349,6 +349,11 @@ namespace NoiseRun
         /// <summary>일시정지 화면 제목·안내 줄의 가운데 y(480×270 기준·화면 중앙이 0·위쪽이 +). 주인공(약 −17~−47)과 머리 위에 멈춰 있는 판정 문구(약 +20~+50)를 피해 그 위에 둔다(T8 스크린샷: 70/40이면 "PERFECT"와 안내 줄이 겹침).</summary>
         public const float UiPauseTitleY = 90f;
         public const float UiPauseHintY = 62f;
+        /// <summary>일시정지 화면의 조작키 4줄 블록 가운데 y(사용자 요청, 제출 준비). 복도 바닥 아래와 타이밍바(윗변 −116) 사이 빈 곳. −85면 마지막 줄이 타이밍바에 닿아(T8 스크린샷) 올렸다.</summary>
+        public const float UiPauseControlsY = -79f;
+        /// <summary>타이틀 조작법 창: 제목 y, 본문 블록 가운데 y(사용자 요청, 제출 준비). 닫기 안내는 UiFooterY.</summary>
+        public const float UiHelpTitleY = 100f;
+        public const float UiHelpBodyY = 0f;
         /// <summary>결과 화면 줄 가운데 y: 제목 / 곡 이름 / 난이도 / 점수 / Perfect·Good·Miss / 최대 콤보. 안내 줄은 UiFooterY(아래쪽).</summary>
         public const float UiResultTitleY = 92f;
         public const float UiResultSongY = 54f;

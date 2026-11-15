@@ -57,7 +57,7 @@ namespace NoiseRun.Tests
         const float SeqTimeTolerance = 0.1f;       // spec 8: stage times within +-0.1s
         const float FadeObserveSec = 0.15f;        // real time to let the 0.6s music fade-out start before it is cancelled
         const float RealTimeMarginSec = 3f;        // extra real time on top of a sequence's length for the frame-driven tests
-        const string PauseText = "일시정지";
+        const string PauseText = "일시정지"; // 일시정지 화면 제목 Text 한 개와 정확히 같은 문구. HUD 조작키 안내("Esc 일시정지")와 구분하려고 부분 문자열이 아니라 항목 일치로 찾는다
         const string GameOverText = "GAME OVER";
         const string EscapedText = "탈출 성공!";
         static readonly double ClipSeconds = GameConfig.MinSongLengthSec * 2.0;
@@ -134,6 +134,27 @@ namespace NoiseRun.Tests
             Assert.AreEqual(GameState.Title, changes[0].prev);
             Assert.AreEqual(GameState.SelectFile, changes[0].next);
             Assert.AreEqual(GameState.SelectFile, flow.State);
+        }
+
+        [UnityTest]
+        public IEnumerator Title_H_OpensControlsHelp_HAndEscClose_StaysOnTitle()
+        {
+            var flow = Bootstrap.Instance.Flow;
+            var keyboard = InputSystem.AddDevice<Keyboard>();
+            yield return null;
+
+            yield return Tap(keyboard.hKey);
+            Assert.IsTrue(flow.HelpOpen);
+            Assert.IsTrue(CanvasTexts().Any(t => t.Contains("슬라이드 (빨래)")), "the help lists which key clears which obstacle");
+
+            yield return Tap(keyboard.hKey);
+            Assert.IsFalse(flow.HelpOpen);
+            CollectionAssert.Contains(CanvasTexts(), "H: 조작법");
+
+            yield return Tap(keyboard.hKey);
+            yield return Tap(keyboard.escapeKey);
+            Assert.IsFalse(flow.HelpOpen);
+            Assert.AreEqual(GameState.Title, flow.State, "Esc only closes the help");
         }
 
         [Test]
@@ -353,7 +374,7 @@ namespace NoiseRun.Tests
             Assert.IsTrue(clock.Paused, "the conductor stops the song clock");
             Assert.AreEqual(1, clock.PauseCalls);
             Assert.AreEqual(0f, Time.timeScale);
-            StringAssert.Contains(PauseText, string.Join("\n", CanvasTexts()));
+            CollectionAssert.Contains(CanvasTexts(), PauseText);
             Assert.AreEqual(pausedAt, clock.Time, "song time stands still while paused");
 
             yield return Tap(keyboard.escapeKey);
@@ -361,7 +382,7 @@ namespace NoiseRun.Tests
             Assert.AreEqual(0f, Time.timeScale, "the picture stays frozen while 3·2·1 runs");
             Assert.IsTrue(clock.Paused, "the song resumes only after the countdown");
             Assert.IsTrue(CanvasTexts().Contains("3"));
-            Assert.IsFalse(string.Join("\n", CanvasTexts()).Contains(PauseText), "the pause screen gives way to the countdown");
+            CollectionAssert.DoesNotContain(CanvasTexts(), PauseText, "the pause screen gives way to the countdown");
 
             yield return Tap(keyboard.escapeKey); // Esc while resuming is ignored
             Assert.AreEqual(GameState.Resuming, flow.State);
@@ -457,7 +478,7 @@ namespace NoiseRun.Tests
             Assert.AreEqual(GameState.Paused, flow.State, "losing focus during the resume countdown pauses again");
             Assert.AreEqual(0f, Time.timeScale);
             Assert.IsFalse(CanvasTexts().Contains("3"), "the resume countdown is cancelled");
-            StringAssert.Contains(PauseText, string.Join("\n", CanvasTexts()));
+            CollectionAssert.Contains(CanvasTexts(), PauseText);
             Assert.AreEqual(0, clock.ResumeCalls, "the song never resumed");
 
             flow.ResumeGame();
@@ -484,7 +505,7 @@ namespace NoiseRun.Tests
             Assert.AreEqual(1, clock.PauseCalls);
             Assert.IsTrue(clock.Paused);
             Assert.AreEqual(0f, Time.timeScale);
-            StringAssert.Contains(PauseText, string.Join("\n", CanvasTexts()));
+            CollectionAssert.Contains(CanvasTexts(), PauseText);
 
             // Back in the window the usual Paused → Resuming → Playing works.
             flow.OnApplicationFocus(true);
@@ -561,7 +582,7 @@ namespace NoiseRun.Tests
             Assert.IsFalse(Bootstrap.Instance.Player.gameObject.activeSelf);
             Assert.IsFalse(Bootstrap.Instance.Chaser.gameObject.activeSelf);
             Assert.IsFalse(Bootstrap.Instance.Hud.gameObject.activeSelf);
-            Assert.IsFalse(string.Join("\n", CanvasTexts()).Contains(PauseText));
+            CollectionAssert.DoesNotContain(CanvasTexts(), PauseText);
         }
 
         [UnityTest]

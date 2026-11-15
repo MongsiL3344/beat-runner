@@ -157,6 +157,31 @@ namespace NoiseRun.Tests
             Assert.IsFalse(string.IsNullOrEmpty(outcome.Error));
         }
 
+        /// <summary>제출 빌드에 넣는 기본 곡 3개가 곡 목록 맨 앞에 있고, 각각 끝까지 디코딩된다(빠지거나 깨진 파일을 패키징 전에 잡는다).</summary>
+        [UnityTest]
+        public IEnumerator BuiltInSongs_ListedFirstAndEachLoads()
+        {
+            string[] expected = { "brazil_punk.mp3", "cute.mp3", "hero_8bit.mp3" };
+            string[] all = FilePicker.ListAllSongs();
+            Assert.GreaterOrEqual(all.Length, expected.Length);
+            for (int i = 0; i < expected.Length; i++)
+            {
+                Assert.AreEqual(expected[i], Path.GetFileName(all[i]), "built-in songs come first, by name");
+                Assert.IsTrue(FilePicker.IsBuiltIn(all[i]));
+            }
+
+            foreach (string name in expected)
+            {
+                var outcome = new LoadOutcome();
+                yield return RunLoad(Path.Combine(FilePicker.BuiltInSongsFolder, name), outcome);
+                Assert.IsFalse(outcome.TimedOut, "Load timed out: " + name);
+                Assert.AreEqual(0, outcome.ErrorCalls, name + ": " + outcome.Error);
+                Assert.Greater(outcome.Clip.length, 30f, name + " should be a full song");
+                UnityEngine.Object.Destroy(outcome.Clip);
+                _clip = null;
+            }
+        }
+
         [UnityTest]
         public IEnumerator UnsupportedExtension_Flac_CallsOnErrorOnly()
         {

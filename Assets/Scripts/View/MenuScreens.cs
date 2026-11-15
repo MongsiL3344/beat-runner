@@ -12,7 +12,13 @@ namespace NoiseRun
     /// </summary>
     public sealed class MenuScreens
     {
-        enum Mode { None, Title, Select, SongList, Loading, Analyzing }
+        enum Mode { None, Title, Help, Select, SongList, Loading, Analyzing }
+
+        /// <summary>플레이 키 안내(사용자 요청, 제출 준비). 일시정지 화면에 그대로 쓰고, 타이틀 조작법 창은 장애물 이름을 붙여 쓴다.</summary>
+        const string PlayControls = "Space/↑  점프\n↓  슬라이드\n→  음파\nEsc  일시정지";
+        const string HelpBody =
+            "Space/↑  점프 (택배 상자)\n↓  슬라이드 (빨래)\n→  음파 (방화문)\nEsc  일시정지\n\n" +
+            "Enter  파일 선택   F  곡 목록   ←/→  난이도\nR  다시   N  다른 곡 (결과 화면)";
 
         readonly Transform canvasRoot;
         GameObject screenRoot;
@@ -167,14 +173,27 @@ namespace NoiseRun
 
             UiFactory.MakeText(rt, "일시정지", GameConfig.TextSizeTitle, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiPauseTitleY));
             UiFactory.MakeText(rt, "Esc: 계속 · Q: 그만두기", GameConfig.TextSizeBody, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiPauseHintY));
+            UiFactory.MakeText(rt, PlayControls, GameConfig.TextSizeBody, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiPauseControlsY));
         }
 
         public void ShowTitle()
         {
             NewRoot(Mode.Title);
             Transform root = screenRoot.transform;
-            UiFactory.MakeText(root, "층간소음 런", GameConfig.TextSizeTitle, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiTitleY));
+            // 게임 이름(사용자 결정, 제출 준비). 25글자라 36px 한 줄에 안 들어가 24px 두 줄로 나눈다.
+            UiFactory.MakeText(root, "당신의 이웃은 층간소음으로 인해\n괴물이 되었습니다", GameConfig.TextSizeHeader, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiTitleY));
             UiFactory.MakeText(root, "Enter: 시작", GameConfig.TextSizeHeader, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiTitlePromptY));
+            UiFactory.MakeText(root, "H: 조작법", GameConfig.TextSizeBody, TextAnchor.LowerCenter, new Vector2(0f, GameConfig.UiFooterY));
+        }
+
+        /// <summary>타이틀에서 H로 여는 조작법 창(사용자 요청, 제출 준비). H나 Esc로 닫으면 GameFlow가 ShowTitle로 돌아간다.</summary>
+        public void ShowHelp()
+        {
+            NewRoot(Mode.Help);
+            Transform root = screenRoot.transform;
+            UiFactory.MakeText(root, "조작법", GameConfig.TextSizeHeader, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiHelpTitleY));
+            UiFactory.MakeText(root, HelpBody, GameConfig.TextSizeBody, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiHelpBodyY));
+            UiFactory.MakeText(root, "H/Esc: 닫기", GameConfig.TextSizeBody, TextAnchor.LowerCenter, new Vector2(0f, GameConfig.UiFooterY));
         }
 
         /// <summary>파일 선택 첫 화면. message는 직전 오류 문구(없으면 null).</summary>
@@ -208,7 +227,8 @@ namespace NoiseRun
                 for (int i = first; i < last; i++)
                 {
                     bool isSelected = i == selected;
-                    string label = (isSelected ? "> " : "  ") + Path.GetFileName(files[i]);
+                    string name = FilePicker.IsBuiltIn(files[i]) ? "[기본] " + FilePicker.BuiltInDisplayName(files[i]) : Path.GetFileName(files[i]);
+                    string label = (isSelected ? "> " : "  ") + name;
                     Text t = UiFactory.MakeText(root, label, GameConfig.TextSizeBody, TextAnchor.UpperCenter,
                         new Vector2(0f, GameConfig.UiListTopY - (i - first) * GameConfig.UiListRowHeight));
                     if (isSelected) t.color = Color.yellow;

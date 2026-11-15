@@ -100,6 +100,9 @@ namespace NoiseRun
         /// <summary>true면 분석 성공 뒤 Preview 대신 T3 분석 디버그 화면(분석 결과를 그리고 곡을 처음부터 재생)으로 간다(startAt=debug). Bootstrap이 정한다.</summary>
         public bool DebugPreview { get; set; }
 
+        /// <summary>타이틀의 조작법 창이 열려 있는지(사용자 요청, 제출 준비). 타이틀에서 H로 열고 H·Esc로 닫는다. 타이틀을 떠나면 닫힌다.</summary>
+        public bool HelpOpen { get; private set; }
+
         /// <summary>Preview·Caught·Escaped 동안의 Time.timeScale(개발 옵션 timeScale). 0보다 커야 한다. Bootstrap이 DevOptions.TimeScale로 정한다.</summary>
         public float PresentationTimeScale
         {
@@ -229,6 +232,7 @@ namespace NoiseRun
             GameState prev = State;
             State = next;
             Time.timeScale = TimeScaleFor(next);
+            if (next != GameState.Title) HelpOpen = false;
             if (next == GameState.SelectFile)
             {
                 selectView = SelectView.Main;
@@ -325,6 +329,8 @@ namespace NoiseRun
             {
                 case GameState.Title:
                     if (enter) ChangeState(GameState.SelectFile);
+                    else if (kb.hKey.wasPressedThisFrame) { HelpOpen = !HelpOpen; Render(); }
+                    else if (HelpOpen && kb.escapeKey.wasPressedThisFrame) { HelpOpen = false; Render(); }
                     break;
                 case GameState.SelectFile:
                     if (selectView == SelectView.Main) UpdateSelectMain(kb, enter);
@@ -450,8 +456,8 @@ namespace NoiseRun
             songIndex = 0;
             try
             {
-                songsFolder = FilePicker.SongsFolder;
-                songs = FilePicker.ListSongs(songsFolder);
+                songsFolder = FilePicker.SongsFolder;   // 화면에 보여 주는 경로는 사용자가 곡을 넣을 폴더
+                songs = FilePicker.ListAllSongs();      // 기본 곡(StreamingAssets/Songs)이 먼저, 그 뒤 사용자 곡
             }
             catch (Exception e)
             {
@@ -1318,7 +1324,8 @@ namespace NoiseRun
             switch (State)
             {
                 case GameState.Title:
-                    menus.ShowTitle();
+                    if (HelpOpen) menus.ShowHelp();
+                    else menus.ShowTitle();
                     break;
                 case GameState.SelectFile:
                     if (selectView == SelectView.Main) menus.ShowSelect(lastError);

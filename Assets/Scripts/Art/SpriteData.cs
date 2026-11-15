@@ -289,6 +289,22 @@ namespace NoiseRun
             ".......kk.......",
         };
 
+        // 주인공 놀람 표시 "!": 외곽선(k) 안에 노란(y) 막대와 점. 머리 위에 띄우는 별도 스프라이트(T8). 6×11, 피벗 (0.5, 0)
+        public static readonly string[] SurpriseMark =
+        {
+            "..kk..",
+            ".kyyk.",
+            ".kyyk.",
+            ".kyyk.",
+            ".kyyk.",
+            ".kyyk.",
+            "..kk..",
+            "......",
+            "..kk..",
+            ".kyyk.",
+            "..kk..",
+        };
+
         // 음파 이펙트 3프레임: 오른쪽으로 퍼지는 동심 호(w 안쪽 + c 바깥), 작은 호 → 큰 호. 16×16, 피벗 (0.5, 0)
         public static readonly string[][] SoundWave =
         {

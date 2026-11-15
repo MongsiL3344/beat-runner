@@ -12,7 +12,8 @@ namespace NoiseRun.Tests
 {
     /// <summary>
     /// T5 flow: difficulty selection with the arrow keys, analysis → Playing, player running in sync with the song clock,
-    /// autoPlay actions and Esc out of Playing. Time is driven by a FakeSongClock and GameFlow.Step.
+    /// autoPlay actions and Esc → Paused → Q out of Playing. The analysis ends in the Preview flythrough; these tests skip it, run the countdown and then
+    /// play. Time is driven by a FakeSongClock and GameFlow.Step.
     /// </summary>
     [PrebuildSetup(typeof(DevFileGuard)), PostBuildCleanup(typeof(DevFileGuard))]
     public class LevelFlowTests : InputTestFixture
@@ -21,7 +22,6 @@ namespace NoiseRun.Tests
         const float ClickBpm = 120f;
         const double ClickFirstBeatSec = 0.5;
         const double AnalysisTimeoutSec = 30.0;
-        const int MaxWaitFrames = 10;
         const float StepDt = 0.016f;
         const float PositionTolerance = 1e-3f;
         const double PastTheEndSec = 100.0;
@@ -38,6 +38,7 @@ namespace NoiseRun.Tests
         {
             clock = new FakeSongClock();
             Bootstrap.Restart(clock);
+            Bootstrap.Instance.Flow.PauseOnFocusLoss = false; // an Editor window focus change must not pause the flows these tests run
             // These tests cover running, judging and the HUD; long no-input steps would otherwise end the run in Caught (T7, ChaserTests).
             Bootstrap.Instance.Chaser.NoCatch = true;
         }
@@ -160,6 +161,7 @@ namespace NoiseRun.Tests
             // Past the end of the song the player stops at the exit.
             clock.Time = map.songLength + PastTheEndSec;
             flow.Step(Bootstrap.Instance.Conductor.SongTime, StepDt);
+            Assert.AreEqual(GameState.Escaped, flow.State, "reaching the song end starts the escape sequence");
             Assert.AreEqual(level.ExitX, player.transform.position.x, PositionTolerance);
             Assert.IsNull(player.CurrentAction);
         }
@@ -263,25 +265,24 @@ namespace NoiseRun.Tests
         // ───────────── Playing: Esc ─────────────
 
         [UnityTest]
-        public IEnumerator Playing_Esc_ReturnsToSelectFileAndClearsLevel()
+        public IEnumerator Playing_EscThenQ_ReturnsToSelectFileAndClearsLevel()
         {
             var flow = Bootstrap.Instance.Flow;
             var keyboard = InputSystem.AddDevice<Keyboard>();
             flow.CurrentDifficulty = Difficulty.Hard;
             float[] samples = ClickSamples(Band.Low, null);
             AudioClip clip = TestAudio.ToClip(samples, SampleRate);
-            flow.StartFromClip(clip, "click");
-            yield return WaitWhileAnalyzing(flow);
-            Assert.AreEqual(GameState.Playing, flow.State, "LastError: " + flow.LastError);
+            yield return ReachPlaying(flow, clip, "click");
 
             LevelBuilder level = Bootstrap.Instance.Level;
             Transform obstacle = level.ObstacleFor(0);
             Assert.IsNotNull(obstacle);
 
-            Press(keyboard.escapeKey);
-            for (int i = 0; i < MaxWaitFrames && flow.State == GameState.Playing; i++)
-                yield return null;
-            Release(keyboard.escapeKey);
+            yield return Tap(keyboard.escapeKey);
+            Assert.AreEqual(GameState.Paused, flow.State, "Esc pauses instead of leaving");
+            Assert.IsNotNull(level.ObstacleFor(0), "pausing keeps the scene");
+
+            yield return Tap(keyboard.qKey);
             yield return null; // Destroy runs at the end of the frame
 
             Assert.AreEqual(GameState.SelectFile, flow.State);
@@ -294,7 +295,7 @@ namespace NoiseRun.Tests
         }
 
         [UnityTest]
-        public IEnumerator Playing_Esc_ResetsPlayerPose()
+        public IEnumerator Playing_EscThenQ_ResetsPlayerPose()
         {
             var flow = Bootstrap.Instance.Flow;
             var keyboard = InputSystem.AddDevice<Keyboard>();
@@ -308,10 +309,8 @@ namespace NoiseRun.Tests
             Assert.AreEqual(ActionType.Jump, player.CurrentAction);
             Assert.Greater(player.transform.position.y, GameConfig.FloorY);
 
-            Press(keyboard.escapeKey);
-            for (int i = 0; i < MaxWaitFrames && flow.State == GameState.Playing; i++)
-                yield return null;
-            Release(keyboard.escapeKey);
+            yield return Tap(keyboard.escapeKey);
+            yield return Tap(keyboard.qKey);
             yield return null;
 
             Assert.AreEqual(GameState.SelectFile, flow.State);
@@ -325,6 +324,12 @@ namespace NoiseRun.Tests
         public IEnumerator Playing_SpaceOnBoxNote_JudgesPerfectJumpAndUpdatesHud()
         {
             yield return PressOnNote(ClickSamples(Band.Low, Band.High), ObstacleKind.Box, k => k.spaceKey, ActionType.Jump);
+        }
+
+        [UnityTest]
+        public IEnumerator Playing_UpOnBoxNote_JudgesPerfectJumpAndUpdatesHud()
+        {
+            yield return PressOnNote(ClickSamples(Band.Low, Band.High), ObstacleKind.Box, k => k.upArrowKey, ActionType.Jump);
         }
 
         [UnityTest]
@@ -376,12 +381,12 @@ namespace NoiseRun.Tests
         }
 
         [UnityTest]
-        public IEnumerator Playing_KeyBeforeSongStart_IsIgnored()
+        public IEnumerator Countdown_Keys_AreIgnored()
         {
             var flow = Bootstrap.Instance.Flow;
             var keyboard = InputSystem.AddDevice<Keyboard>();
             flow.CurrentDifficulty = Difficulty.Hard;
-            yield return ReachPlaying(flow, ClickSamples(Band.Low, null), "click");
+            yield return ReachCountdown(flow, ClickSamples(Band.Low, null), "click");
             flow.AutoPlay = false;
 
             var events = new List<JudgeEvent>();
@@ -391,7 +396,9 @@ namespace NoiseRun.Tests
             yield return Tap(keyboard.spaceKey);
             yield return Tap(keyboard.downArrowKey);
             yield return Tap(keyboard.rightArrowKey);
+            yield return Tap(keyboard.escapeKey); // no pause during the countdown
 
+            Assert.AreEqual(GameState.Countdown, flow.State);
             Assert.AreEqual(0, events.Count, "inputs while songTime < 0 must not be judged");
             Assert.IsNull(Bootstrap.Instance.Hud.JudgementLabel);
             Assert.AreEqual(0, flow.Judge.Score);
@@ -438,7 +445,7 @@ namespace NoiseRun.Tests
         }
 
         [UnityTest]
-        public IEnumerator Playing_ShowsHudAndBar_AndEscHidesThem()
+        public IEnumerator Playing_ShowsHudAndBar_AndQuittingHidesThem()
         {
             var flow = Bootstrap.Instance.Flow;
             var keyboard = InputSystem.AddDevice<Keyboard>();
@@ -453,14 +460,13 @@ namespace NoiseRun.Tests
             Assert.IsNotEmpty(hud.ScoreLabel);
             Assert.AreEqual(0, bar.TargetNoteIndex, "the bar is bound to the first note");
 
-            clock.Time = flow.Map.songLength + PastTheEndSec;
+            clock.Time = flow.Map.notes[0].time + GameConfig.GoodWindowSec * 2.0;
             flow.Step(Bootstrap.Instance.Conductor.SongTime, StepDt);
+            Assert.AreEqual(GameState.Playing, flow.State);
             Assert.Greater(flow.Judge.MissCount, 0);
 
-            Press(keyboard.escapeKey);
-            for (int i = 0; i < MaxWaitFrames && flow.State == GameState.Playing; i++)
-                yield return null;
-            Release(keyboard.escapeKey);
+            yield return Tap(keyboard.escapeKey);
+            yield return Tap(keyboard.qKey);
             yield return null;
 
             Assert.AreEqual(GameState.SelectFile, flow.State);
@@ -542,14 +548,34 @@ namespace NoiseRun.Tests
             yield return null;
         }
 
-        /// <summary>Starts the analysis of the samples and runs frames until the flow reaches Playing.</summary>
-        static IEnumerator ReachPlaying(GameFlow flow, float[] samples, string songName)
+        /// <summary>Starts the analysis, skips the Preview flythrough and runs until the countdown is waiting for the song (song time −2.1).</summary>
+        IEnumerator ReachCountdown(GameFlow flow, float[] samples, string songName)
         {
-            AudioClip clip = TestAudio.ToClip(samples, SampleRate);
+            return ReachCountdown(flow, TestAudio.ToClip(samples, SampleRate), songName);
+        }
+
+        IEnumerator ReachCountdown(GameFlow flow, AudioClip clip, string songName)
+        {
             flow.StartFromClip(clip, songName);
             yield return WaitWhileAnalyzing(flow);
-            Assert.AreEqual(GameState.Playing, flow.State, "LastError: " + flow.LastError);
+            Assert.AreEqual(GameState.Preview, flow.State, "LastError: " + flow.LastError);
             Assert.IsNotNull(flow.Map);
+            flow.SkipPreview();
+            Assert.AreEqual(GameState.Countdown, flow.State);
+        }
+
+        /// <summary>Analysis → Preview → skip → Countdown → song time 0 → Playing.</summary>
+        IEnumerator ReachPlaying(GameFlow flow, float[] samples, string songName)
+        {
+            return ReachPlaying(flow, TestAudio.ToClip(samples, SampleRate), songName);
+        }
+
+        IEnumerator ReachPlaying(GameFlow flow, AudioClip clip, string songName)
+        {
+            yield return ReachCountdown(flow, clip, songName);
+            clock.Time = 0.0;
+            flow.Step(clock.Time, 0f);
+            Assert.AreEqual(GameState.Playing, flow.State);
         }
 
         static IEnumerator WaitWhileAnalyzing(GameFlow flow)

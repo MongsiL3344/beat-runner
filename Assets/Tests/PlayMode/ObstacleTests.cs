@@ -201,7 +201,7 @@ namespace NoiseRun.Tests
             }
             float cameraLeftReach = GameConfig.PlayerViewportX * 2f * GameConfig.CameraOrthoSize * AspectWide;
             Assert.LessOrEqual(minX, -GameConfig.LeadInDistanceUnits - cameraLeftReach,
-                "카운트다운 동안 달리는 시작 위치(x<0)와 그 왼쪽 화면 끝까지 복도가 있어야 합니다");
+                "시작 위치(x=0) 왼쪽으로 카운트다운 이웃이 걸어 들어오는 화면 끝(LeadInDistanceUnits)까지 복도가 있어야 합니다");
             Assert.GreaterOrEqual(maxX, level.ExitX, "비상구 아래까지 바닥이 이어져야 합니다");
         }
 

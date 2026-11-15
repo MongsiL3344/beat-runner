@@ -29,6 +29,9 @@ namespace NoiseRun
         GameObject levelRoot;
         BeatMap map;
         Sprite blownDoorSprite;
+        Sprite exitClosedSprite;
+        Sprite exitOpenSprite;
+        SpriteRenderer exitRenderer;
 
         /// <summary>parent 아래에 새 GameObject를 만든다. 빈 상태이며 Build를 불러야 레벨이 생긴다.</summary>
         public static LevelBuilder Create(Transform parent)
@@ -43,6 +46,20 @@ namespace NoiseRun
 
         /// <summary>비상구(닫힘) 오브젝트. 표지판은 자식이다. Build 전·Clear 뒤에는 null.</summary>
         public Transform Exit { get; private set; }
+
+        /// <summary>비상구 문이 열린 그림(ExitOpen)인지. Build 직후·Clear 뒤에는 false(닫힘).</summary>
+        public bool ExitIsOpen { get; private set; }
+
+        /// <summary>
+        /// 비상구 그림을 ExitOpen(true) / ExitClosed(false)로 바꾼다(탈출 연출, T8). 두 그림은 같은 20×32 크기·피벗이라 자리는 변하지 않는다.
+        /// Build 전·Clear 뒤에는 아무것도 하지 않는다(ExitIsOpen은 false 그대로).
+        /// </summary>
+        public void SetExitOpen(bool open)
+        {
+            if (exitRenderer == null) return;
+            ExitIsOpen = open;
+            exitRenderer.sprite = open ? exitOpenSprite : exitClosedSprite;
+        }
 
         public float TimeToX(double t) => (float)(t * GameConfig.ScrollSpeed);
 
@@ -137,6 +154,8 @@ namespace NoiseRun
             flyingDoors.Clear();
             obstacles.Clear();
             Exit = null;
+            ExitIsOpen = false;
+            exitRenderer = null;
             map = null;
             ReleaseSprites();
         }
@@ -158,6 +177,8 @@ namespace NoiseRun
                 Destroy(sprite);
             }
             blownDoorSprite = null;
+            exitClosedSprite = null;
+            exitOpenSprite = null;
             made.Clear();
         }
 
@@ -294,10 +315,13 @@ namespace NoiseRun
 
         void BuildExit()
         {
-            Sprite closed = Make(SpriteData.ExitClosed, FootPivot);
+            exitClosedSprite = Make(SpriteData.ExitClosed, FootPivot);
+            exitOpenSprite = Make(SpriteData.ExitOpen, FootPivot);
             Sprite sign = Make(SpriteData.ExitSign, FootPivot);
-            Exit = SpawnSprite("Exit", closed, ExitX, GameConfig.FloorY, GameConfig.SortOrderObstacle, levelRoot.transform);
-            SpawnSprite("ExitSign", sign, 0f, closed.rect.height / GameConfig.PixelsPerUnit, GameConfig.SortOrderObstacle, Exit);
+            Exit = SpawnSprite("Exit", exitClosedSprite, ExitX, GameConfig.FloorY, GameConfig.SortOrderObstacle, levelRoot.transform);
+            exitRenderer = Exit.GetComponent<SpriteRenderer>();
+            ExitIsOpen = false;
+            SpawnSprite("ExitSign", sign, 0f, exitClosedSprite.rect.height / GameConfig.PixelsPerUnit, GameConfig.SortOrderObstacle, Exit);
         }
 
         static Transform SpawnSprite(string name, Sprite sprite, float x, float y, int order, Transform parent)

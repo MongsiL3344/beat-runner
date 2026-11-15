@@ -40,16 +40,20 @@ namespace NoiseRun
             }
         }
 
-        static string DifficultyLine(Difficulty d)
+        /// <summary>난이도 한글 이름("쉬움"/"보통"/"어려움"). 결과 화면도 같이 쓴다.</summary>
+        public static string DifficultyName(Difficulty d)
         {
-            string label;
             switch (d)
             {
-                case Difficulty.Easy: label = "쉬움"; break;
-                case Difficulty.Hard: label = "어려움"; break;
-                default: label = "보통"; break;
+                case Difficulty.Easy: return "쉬움";
+                case Difficulty.Hard: return "어려움";
+                default: return "보통";
             }
-            return "난이도: " + label + "   ←/→: 난이도";
+        }
+
+        static string DifficultyLine(Difficulty d)
+        {
+            return "난이도: " + DifficultyName(d) + "   ←/→: 난이도";
         }
 
         /// <summary>불러오기·분석 화면에 띄우는 곡 이름. ShowLoading/ShowAnalyzing 전에 지정한다.</summary>
@@ -60,10 +64,109 @@ namespace NoiseRun
             canvasRoot = canvas;
         }
 
+        /// <summary>모든 화면과 오버레이(카운트다운·일시정지·배너·미리보기 정보)를 숨긴다.</summary>
         public void HideAll()
         {
             DestroyRoot();
             mode = Mode.None;
+            ShowCountdown(null);
+            ShowPause(false);
+            ShowBanner(null);
+            ShowPreviewInfo(null, 0f);
+        }
+
+        // ───────────── 오버레이(T8) ─────────────
+        // 화면(screenRoot)과 따로 있어서 Show*가 지우지 않고, 불투명 배경도 없다(게임 장면을 가리지 않음). 켤 때 Canvas 맨 위로 올린다.
+
+        Text countdownLabel;
+        Text bannerLabel;
+        Text previewLabel;
+        GameObject pauseRoot;
+        string countdownText;
+        string bannerText;
+
+        /// <summary>지금 띄운 카운트다운 문구("3"·"2"·"1"·"GO"). 숨겼으면 마지막으로 넘긴 null/빈 문자열(테스트용).</summary>
+        public string CountdownText => countdownText;
+
+        /// <summary>지금 띄운 배너 문구(예: "탈출 성공!", "GAME OVER"). 숨겼으면 null(테스트용).</summary>
+        public string BannerText => bannerText;
+
+        /// <summary>일시정지 오버레이가 떠 있는지(테스트용).</summary>
+        public bool PauseVisible => pauseRoot != null && pauseRoot.activeSelf;
+
+        /// <summary>화면 가운데에 큰 글자로 카운트다운 문구를 띄운다. null/빈 문자열이면 숨긴다.</summary>
+        public void ShowCountdown(string text)
+        {
+            countdownText = text;
+            countdownLabel = SetOverlayLabel(countdownLabel, text, GameConfig.TextSizeTitle, TextAnchor.MiddleCenter, Vector2.zero);
+        }
+
+        /// <summary>화면 가운데에 큰 글자로 배너 문구를 띄운다. null이면 숨긴다.</summary>
+        public void ShowBanner(string text)
+        {
+            bannerText = text;
+            bannerLabel = SetOverlayLabel(bannerLabel, text, GameConfig.TextSizeTitle, TextAnchor.MiddleCenter, Vector2.zero);
+        }
+
+        /// <summary>미리보기 화면 위쪽에 곡 이름과 BPM을 띄운다. songName이 null이면 숨긴다.</summary>
+        public void ShowPreviewInfo(string songName, float bpm)
+        {
+            string text = songName == null
+                ? null
+                : songName + "   BPM " + bpm.ToString("0.#", CultureInfo.InvariantCulture);
+            previewLabel = SetOverlayLabel(previewLabel, text, GameConfig.TextSizeHeader, TextAnchor.UpperCenter, new Vector2(0f, GameConfig.UiHeaderY));
+        }
+
+        /// <summary>
+        /// 일시정지 오버레이를 켜거나 끈다: 반투명 어두운 패널 + "일시정지" + "Esc: 계속 · Q: 그만두기".
+        /// 재개 카운트다운 숫자는 ShowCountdown으로 따로 띄운다.
+        /// </summary>
+        public void ShowPause(bool on)
+        {
+            if (!on)
+            {
+                if (pauseRoot != null) pauseRoot.SetActive(false);
+                return;
+            }
+            if (pauseRoot == null) BuildPause();
+            pauseRoot.SetActive(true);
+            pauseRoot.transform.SetAsLastSibling();
+        }
+
+        Text SetOverlayLabel(Text label, string text, int size, TextAnchor anchor, Vector2 pos)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                if (label != null) label.gameObject.SetActive(false);
+                return label;
+            }
+            if (label == null) label = UiFactory.MakeText(canvasRoot, text, size, anchor, pos);
+            label.text = text;
+            label.gameObject.SetActive(true);
+            label.transform.SetAsLastSibling();
+            return label;
+        }
+
+        void BuildPause()
+        {
+            pauseRoot = new GameObject("Pause", typeof(RectTransform));
+            var rt = (RectTransform)pauseRoot.transform;
+            rt.SetParent(canvasRoot, false);
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+
+            Image dim = UiFactory.MakeImage(rt, PixelArt.WhitePixel, Vector2.zero, Vector2.zero);
+            var dimRect = (RectTransform)dim.transform;
+            dimRect.anchorMin = Vector2.zero;
+            dimRect.anchorMax = Vector2.one;
+            dimRect.offsetMin = Vector2.zero;
+            dimRect.offsetMax = Vector2.zero;
+            dim.color = new Color(0f, 0f, 0f, GameConfig.PausePanelAlpha);
+
+            UiFactory.MakeText(rt, "일시정지", GameConfig.TextSizeTitle, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiPauseTitleY));
+            UiFactory.MakeText(rt, "Esc: 계속 · Q: 그만두기", GameConfig.TextSizeBody, TextAnchor.MiddleCenter, new Vector2(0f, GameConfig.UiPauseHintY));
         }
 
         public void ShowTitle()
@@ -179,9 +282,14 @@ namespace NoiseRun
             shownPercent = -1;
         }
 
+        /// <summary>메뉴 화면(타이틀·파일 선택·불러오기·분석)을 새로 만든다. 게임 장면용 오버레이(일시정지 등)는 메뉴 화면과 함께 뜨지 않으므로 숨긴다.</summary>
         void NewRoot(Mode next)
         {
             DestroyRoot();
+            ShowCountdown(null);
+            ShowPause(false);
+            ShowBanner(null);
+            ShowPreviewInfo(null, 0f);
             mode = next;
             screenRoot = new GameObject("Screen", typeof(RectTransform));
             var rt = (RectTransform)screenRoot.transform;

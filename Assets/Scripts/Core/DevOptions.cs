@@ -9,12 +9,13 @@ namespace NoiseRun
 {
     /// <summary>
     /// 개발·검증용 옵션. Editor에서만 &lt;프로젝트&gt;/Temp/noiserun_dev.txt(줄마다 키=값)를 읽는다.
-    /// 빌드에서는 파일을 읽지 않고 모두 기본값(null, false)이다. 인식하는 키: file, startAt, freezeAt, gallery, autoPlay, noCatch.
+    /// 빌드에서는 파일을 읽지 않고 모두 기본값(null, false, TimeScale 1)이다. 인식하는 키: file, startAt, freezeAt, gallery, autoPlay, noCatch, timeScale, forceEnd.
     /// </summary>
     public static class DevOptions
     {
-        static readonly HashSet<string> KnownKeys = new HashSet<string> { "file", "startAt", "freezeAt", "gallery", "autoPlay", "noCatch" };
+        static readonly HashSet<string> KnownKeys = new HashSet<string> { "file", "startAt", "freezeAt", "gallery", "autoPlay", "noCatch", "timeScale", "forceEnd" };
         static readonly HashSet<string> StartAtValues = new HashSet<string> { "title", "preview", "playing", "debug" };
+        static readonly HashSet<string> ForceEndValues = new HashSet<string> { "caught", "escaped" };
 
         /// <summary>Load 후 file 키 값. 없으면 null.</summary>
         public static string AutoFile { get; private set; }
@@ -34,6 +35,12 @@ namespace NoiseRun
         /// <summary>noCatch 키 값(true면 추격자가 잡지 않음. Bootstrap이 ChaserController.NoCatch에 넣는다). 없거나 true/false가 아니면 false.</summary>
         public static bool NoCatch { get; private set; }
 
+        /// <summary>timeScale 키 값(Preview·Caught·Escaped 연출 동안의 Time.timeScale, 느리게 보기용). 0보다 큰 숫자만 받고, 없거나 잘못되면 1.</summary>
+        public static float TimeScale { get; private set; } = 1f;
+
+        /// <summary>forceEnd 키 값("caught" 또는 "escaped": Playing에 들어가는 즉시 해당 연출을 시작. Bootstrap이 GameFlow.ForceEnd에 넣는다). 없거나 모르는 값이면 null.</summary>
+        public static string ForceEnd { get; private set; }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
@@ -43,6 +50,8 @@ namespace NoiseRun
             Gallery = false;
             AutoPlay = false;
             NoCatch = false;
+            TimeScale = 1f;
+            ForceEnd = null;
         }
 
         /// <summary>옵션 파일을 읽는다. 파일을 읽었으면 true. 빌드에서는 항상 false.</summary>
@@ -54,6 +63,8 @@ namespace NoiseRun
             Gallery = false;
             AutoPlay = false;
             NoCatch = false;
+            TimeScale = 1f;
+            ForceEnd = null;
 #if UNITY_EDITOR
             string path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Temp", "noiserun_dev.txt"));
             if (!File.Exists(path)) return false;
@@ -84,6 +95,8 @@ namespace NoiseRun
                 else if (key == "gallery") Gallery = ParseBool(key, value);
                 else if (key == "autoPlay") AutoPlay = ParseBool(key, value);
                 else if (key == "noCatch") NoCatch = ParseBool(key, value);
+                else if (key == "timeScale") TimeScale = ParseTimeScale(value);
+                else if (key == "forceEnd") ForceEnd = ParseForceEnd(value);
             }
             return true;
 #else
@@ -107,6 +120,24 @@ namespace NoiseRun
                 && !double.IsNaN(seconds) && !double.IsInfinity(seconds))
                 return seconds;
             Debug.LogWarning("DevOptions: freezeAt 값 '" + value + "' 은(는) 숫자가 아닙니다");
+            return null;
+        }
+
+        static float ParseTimeScale(string value)
+        {
+            if (value.Length == 0) return 1f;
+            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float scale)
+                && !float.IsNaN(scale) && !float.IsInfinity(scale) && scale > 0f)
+                return scale;
+            Debug.LogWarning("DevOptions: timeScale 값 '" + value + "' 은(는) 0보다 큰 숫자가 아닙니다");
+            return 1f;
+        }
+
+        static string ParseForceEnd(string value)
+        {
+            if (value.Length == 0) return null;
+            if (ForceEndValues.Contains(value)) return value;
+            Debug.LogWarning("DevOptions: forceEnd 값 '" + value + "' 을(를) 알 수 없습니다(caught, escaped)");
             return null;
         }
 

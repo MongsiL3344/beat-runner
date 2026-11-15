@@ -4,7 +4,7 @@ using UnityEngine.UI;
 namespace NoiseRun
 {
     /// <summary>
-    /// 자동 시작, 카메라·Canvas·Conductor·레벨·주인공·추격자·카메라 연출·HUD·타이밍 바·GameFlow 생성. 만든 오브젝트는 모두 이 GameObject 아래에 두어
+    /// 자동 시작, 카메라·Canvas·Conductor·레벨·주인공·추격자·카메라 연출·HUD·타이밍 바·결과 화면·GameFlow 생성. 만든 오브젝트는 모두 이 GameObject 아래에 두어
     /// Restart 때 한꺼번에 제거된다(씬의 Main Camera는 건드리지 않는다).
     /// </summary>
     public sealed class Bootstrap : MonoBehaviour
@@ -20,6 +20,7 @@ namespace NoiseRun
         public CameraDirector CameraDirector { get; private set; }
         public Hud Hud { get; private set; }
         public BeatBarUI BeatBar { get; private set; }
+        public ResultScreen Result { get; private set; }
 
         MenuScreens menus;
         AnalysisDebugView debugView;
@@ -45,13 +46,15 @@ namespace NoiseRun
 
         static void ApplyDevOptions(Bootstrap b)
         {
-            // startAt: debug는 T3 분석 디버그 화면, playing(기본)은 분석 직후 Playing. title·preview는 T8에서 지원한다.
+            // startAt: debug는 T3 분석 디버그 화면. 그 밖(playing 기본)은 분석 뒤 Preview → Countdown → Playing으로 끝까지 자동 진행한다. title·preview는 아직 지원하지 않는다.
             string startAt = DevOptions.StartAt;
             if (startAt == "title" || startAt == "preview")
-                Debug.LogWarning("DevOptions: startAt=" + startAt + " 은(는) 아직 지원하지 않습니다. 기본 동작(분석 후 Playing)으로 진행합니다.");
+                Debug.LogWarning("DevOptions: startAt=" + startAt + " 은(는) 아직 지원하지 않습니다. 기본 동작(분석 후 Preview → Countdown → Playing)으로 진행합니다.");
             b.Flow.DebugPreview = startAt == "debug";
             b.Flow.AutoPlay = DevOptions.AutoPlay;
             b.Chaser.NoCatch = DevOptions.NoCatch;
+            b.Flow.PresentationTimeScale = DevOptions.TimeScale;
+            b.Flow.ForceEnd = DevOptions.ForceEnd;
 
             double? freezeAt = DevOptions.FreezeAt;
             if (freezeAt.HasValue)
@@ -125,8 +128,9 @@ namespace NoiseRun
             Hud = Hud.Create(Canvas.transform);
             Hud.Follow(Player.transform, cam);
             BeatBar = BeatBarUI.Create(Canvas.transform);
+            Result = ResultScreen.Create(Canvas.transform); // 처음엔 숨김. Canvas의 맨 위에 그려야 하므로 HUD·타이밍 바 다음에 만든다
             Flow = gameObject.AddComponent<GameFlow>();
-            Flow.Init(Conductor, menus, debugView, Level, Player, Chaser, CameraDirector, Hud, BeatBar);
+            Flow.Init(Conductor, menus, debugView, Level, Player, Chaser, CameraDirector, Hud, BeatBar, Result);
         }
 
         void OnDestroy()

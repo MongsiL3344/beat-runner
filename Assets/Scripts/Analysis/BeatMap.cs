@@ -114,9 +114,11 @@ namespace NoiseRun
         }
     }
 
+    /// <summary>결과 화면(ResultScreen)에 띄울 한 판의 요약. escaped가 true면 "탈출 성공!", false면 잡힘. songName은 T8 추가, best는 E5(T12)용.</summary>
     public sealed class ResultData
     {
         public bool escaped;
+        public string songName;
         public Difficulty difficulty;
         public int score, perfect, good, miss, maxCombo, best;
     }

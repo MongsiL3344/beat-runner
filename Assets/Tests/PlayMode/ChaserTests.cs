@@ -23,11 +23,12 @@ namespace NoiseRun.Tests
 
         const int SampleRate = 44100;
         const float ClickBpm = 120f;
+        const int MaxWaitFrames = 10;
+        const float RunToEndSec = 100f;     // 한 번의 Advance로 연출 전체를 끝까지 돌림
         const double ClickFirstBeatSec = 0.5;
         const double ThreeMinutesSec = 180.0;
         const double AnalysisTimeoutSec = 60.0;
         const float FlowStepDt = 0.05f;
-        const int MaxWaitFrames = 10;
 
         ChaserController chaser;
         int caughtCount;
@@ -38,6 +39,7 @@ namespace NoiseRun.Tests
         {
             clock = new FakeSongClock();
             Bootstrap.Restart(clock);
+            Bootstrap.Instance.Flow.PauseOnFocusLoss = false; // an Editor window focus change must not pause the flows these tests run
         }
 
         [TearDown]
@@ -263,7 +265,7 @@ namespace NoiseRun.Tests
         }
 
         [UnityTest]
-        public IEnumerator Playing_NoInput_GetsCaught_ThenEscReturnsToSelectFile()
+        public IEnumerator Playing_NoInput_GetsCaught_ThenCaughtSequenceEndsInResult_AndNReturnsToSelectFile()
         {
             var flow = Bootstrap.Instance.Flow;
             var keyboard = InputSystem.AddDevice<Keyboard>();
@@ -279,7 +281,7 @@ namespace NoiseRun.Tests
             Assert.AreEqual(GameConfig.ChaserCatchDistance, c.Distance, Tolerance);
             Debug.Log($"[ChaserTests] 무입력(보통, 3분 클릭 트랙): {caughtAt:F2}초에 잡힘, Miss {flow.Judge.MissCount}개, 첫 노트 {flow.Map.notes[0].time:F2}초");
 
-            // Caught에서는 Step이 아무것도 바꾸지 않는다(멈춘 화면).
+            // Caught에서는 Step이 아무것도 바꾸지 않는다(판정·추격자 진행 없음). 장면은 Advance가 연출 시간표로만 움직인다.
             float x = c.transform.position.x;
             int misses = flow.Judge.MissCount;
             clock.Time = flow.Map.songLength;
@@ -287,10 +289,16 @@ namespace NoiseRun.Tests
             Assert.AreEqual(x, c.transform.position.x);
             Assert.AreEqual(misses, flow.Judge.MissCount);
 
-            Press(keyboard.escapeKey);
-            for (int i = 0; i < MaxWaitFrames && flow.State == GameState.Caught; i++)
+            flow.Advance(RunToEndSec);
+            Assert.AreEqual(GameState.Result, flow.State);
+            Assert.IsFalse(flow.LastResult.escaped);
+            Assert.AreEqual(misses, flow.LastResult.miss);
+            Assert.IsTrue(c.gameObject.activeSelf, "the last scene stays under the result panel");
+
+            Press(keyboard.nKey);
+            for (int i = 0; i < MaxWaitFrames && flow.State == GameState.Result; i++)
                 yield return null;
-            Release(keyboard.escapeKey);
+            Release(keyboard.nKey);
             yield return null;
 
             Assert.AreEqual(GameState.SelectFile, flow.State);
@@ -321,17 +329,17 @@ namespace NoiseRun.Tests
             Debug.Log($"[ChaserTests] 무실수 autoPlay(보통, 3분 클릭 트랙): 노트 {map.notes.Count}개, 최대 콤보 {flow.Judge.MaxCombo}, " +
                       $"최소 거리 {minDistance:F3}, 곡 끝 거리 {c.Distance:F3}");
 
-            // 곡 끝: 주인공은 비상구로 계속 달리고 이웃은 그 자리에 선다(8.2).
+            // 곡 끝: 탈출 연출이 시작되고, 주인공은 비상구로 계속 달리며 이웃은 그 자리에 선다(8.2).
             clock.Time = map.songLength;
             flow.Step(clock.Time, SettleDt);
+            Assert.AreEqual(GameState.Escaped, flow.State);
             float stoppedX = c.transform.position.x;
             float distance = c.Distance;
-            clock.Time = map.songLength + 5.0;
-            flow.Step(clock.Time, SettleDt);
+            flow.Advance(1f);
+            Assert.AreEqual(GameState.Escaped, flow.State, "the escape sequence is still running");
             Assert.AreEqual(stoppedX, c.transform.position.x, Tolerance);
             Assert.AreEqual(distance, c.Distance);
             Assert.AreEqual(Bootstrap.Instance.Level.ExitX, Bootstrap.Instance.Player.transform.position.x, Tolerance);
-            Assert.AreEqual(GameState.Playing, flow.State);
         }
 
         // ───────────── 도우미 ─────────────
@@ -348,7 +356,7 @@ namespace NoiseRun.Tests
             return -1.0;
         }
 
-        static IEnumerator ReachPlaying(GameFlow flow, double seconds, Difficulty difficulty)
+        IEnumerator ReachPlaying(GameFlow flow, double seconds, Difficulty difficulty)
         {
             flow.CurrentDifficulty = difficulty;
             float[] samples = TestAudio.ClickTrack(SampleRate, seconds, ClickBpm, ClickFirstBeatSec, Band.Low, Band.High);
@@ -356,9 +364,15 @@ namespace NoiseRun.Tests
             double deadline = Time.realtimeSinceStartupAsDouble + AnalysisTimeoutSec;
             while (flow.State == GameState.Analyzing && Time.realtimeSinceStartupAsDouble < deadline)
                 yield return null;
-            Assert.AreEqual(GameState.Playing, flow.State, "LastError: " + flow.LastError);
+            Assert.AreEqual(GameState.Preview, flow.State, "LastError: " + flow.LastError);
             Assert.IsNotNull(flow.Map);
             Assert.IsNotEmpty(flow.Map.notes);
+
+            flow.SkipPreview();
+            Assert.AreEqual(GameState.Countdown, flow.State);
+            clock.Time = 0.0;
+            flow.Step(clock.Time, 0f);
+            Assert.AreEqual(GameState.Playing, flow.State);
         }
     }
 }

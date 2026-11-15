@@ -11,8 +11,8 @@ namespace NoiseRun
     [RequireComponent(typeof(SpriteRenderer), typeof(SpriteAnimator))]
     public sealed class PlayerController : MonoBehaviour
     {
-        /// <summary>판정 반응 연출(6.3). 반응 중에는 동작이 없다(CurrentAction == null).</summary>
-        public enum Reaction { None, Hit, Stumble }
+        /// <summary>판정 반응·연출(6.3, 8.2). 반응 중에는 동작이 없다(CurrentAction == null). Surprise는 카운트다운의 제자리 놀람 점프다.</summary>
+        public enum Reaction { None, Hit, Stumble, Surprise }
 
         static readonly Vector2 FootPivot = new Vector2(0.5f, 0f);
 
@@ -30,6 +30,7 @@ namespace NoiseRun
         Sprite[] soundWave;
         Sprite hitFrame;
         Sprite stumbleFrame;
+        SpriteRenderer surpriseMarkRenderer;
 
         bool running;
         bool facingRight = true;
@@ -41,6 +42,10 @@ namespace NoiseRun
         Reaction reaction;
         float reactionDuration;
         float reactionElapsed;
+        float runAnimScale = 1f;
+        bool flattened;
+        bool surpriseMarkActive;
+        float surpriseMarkElapsed;
 
         /// <summary>parent 아래에 주인공을 만든다. 처음에는 대기 프레임이다.</summary>
         public static PlayerController Create(Transform parent)
@@ -52,6 +57,18 @@ namespace NoiseRun
 
         /// <summary>진행 중인 동작. 동작이 없으면 null.</summary>
         public ActionType? CurrentAction => action;
+
+        /// <summary>머리 위 놀람 표시 "!"가 보이는 중인지(PlaySurprise 뒤 SurpriseMarkSec 동안).</summary>
+        public bool SurpriseMarkVisible => surpriseMarkActive;
+
+        /// <summary>ShowFlattened로 납작해진 채인지(다음 ResetPose·SetRunning·동작·반응까지). 테스트가 읽음.</summary>
+        public bool IsFlattened => flattened;
+
+        /// <summary>마지막 Face가 오른쪽(true)인지. 처음은 오른쪽. 테스트가 읽음.</summary>
+        public bool FacingRight => facingRight;
+
+        /// <summary>SetRunAnimSpeed로 정한 달리기 애니 속도 배율(ResetPose 뒤 1). 테스트가 읽음.</summary>
+        public float RunAnimScale => runAnimScale;
 
         /// <summary>진행 중인 판정 반응. 없으면 None.</summary>
         public Reaction CurrentReaction => reaction;
@@ -84,6 +101,15 @@ namespace NoiseRun
             waveAnimator = waveGo.AddComponent<SpriteAnimator>();
             waveGo.SetActive(false);
 
+            Sprite surpriseMarkSprite = Make(SpriteData.SurpriseMark);
+            var markGo = new GameObject("SurpriseMark");
+            markGo.transform.SetParent(transform, false); // 몸 SpriteRenderer.flipX와 무관하므로 Face에 영향받지 않는다
+            markGo.transform.localPosition = new Vector3(0f, GameConfig.SurpriseMarkOffsetY, 0f);
+            surpriseMarkRenderer = markGo.AddComponent<SpriteRenderer>();
+            surpriseMarkRenderer.sprite = surpriseMarkSprite;
+            surpriseMarkRenderer.sortingOrder = GameConfig.SortOrderEffect;
+            markGo.SetActive(false);
+
             x = transform.position.x;
             ShowBaseAnimation();
         }
@@ -107,10 +133,22 @@ namespace NoiseRun
         /// <summary>동작·반응 시간을 dt초 진행한다. Update가 Time.deltaTime으로 부르며, 테스트는 직접 부를 수 있다.</summary>
         public void Advance(float dt)
         {
+            if (surpriseMarkActive)
+            {
+                surpriseMarkElapsed += dt;
+                if (surpriseMarkElapsed >= GameConfig.SurpriseMarkSec) HideSurpriseMark();
+            }
+
             if (reaction != Reaction.None)
             {
                 reactionElapsed += dt;
-                if (reactionElapsed >= reactionDuration) EndAction();
+                if (reactionElapsed >= reactionDuration)
+                {
+                    EndAction();
+                    return;
+                }
+
+                if (reaction == Reaction.Surprise) ApplySurpriseHop(reactionElapsed / reactionDuration);
                 return;
             }
 
@@ -150,12 +188,34 @@ namespace NoiseRun
             ApplyWaveFacing();
         }
 
-        /// <summary>달리기(RunAnimFps) ↔ 대기. 동작·반응 중이면 그것이 끝난 뒤에 반영한다.</summary>
+        /// <summary>
+        /// 달리기(RunAnimFps × SetRunAnimSpeed 배율) ↔ 대기. 동작·반응 중이면 그것이 끝난 뒤에 반영한다.
+        /// ShowFlattened로 납작해진 상태는 값이 같아도 여기서 풀고 기본 애니메이션으로 돌아간다.
+        /// </summary>
         public void SetRunning(bool running)
         {
+            if (flattened)
+            {
+                flattened = false;
+                this.running = running;
+                ShowBaseAnimation();
+                return;
+            }
+
             if (this.running == running) return;
             this.running = running;
             if (action == null && reaction == Reaction.None) ShowBaseAnimation();
+        }
+
+        /// <summary>
+        /// 달리기 애니메이션 속도 배율(0 이상): 달리기 fps = RunAnimFps × scale. 지금 달리기 프레임을 보여 주는 중이면 프레임·진행을 유지한 채 바로 반영하고,
+        /// 동작·반응·납작함 중이거나 대기 중이면 값만 기억했다가 달리기로 돌아올 때 쓴다. ResetPose가 1로 되돌린다.
+        /// </summary>
+        public void SetRunAnimSpeed(float scale)
+        {
+            runAnimScale = Mathf.Max(0f, scale);
+            if (running && action == null && reaction == Reaction.None && !flattened)
+                animator.SetFps(GameConfig.RunAnimFps * runAnimScale);
         }
 
         /// <summary>
@@ -165,6 +225,7 @@ namespace NoiseRun
         /// </summary>
         public void DoAction(ActionType a, float duration)
         {
+            flattened = false;
             reaction = Reaction.None;
             reactionElapsed = 0f;
             action = a;
@@ -205,9 +266,50 @@ namespace NoiseRun
             StartReaction(Reaction.Stumble, stumbleFrame, GameConfig.StumbleSec);
         }
 
+        /// <summary>
+        /// 놀람(8.2 "2"): 진행 중인 동작·반응을 끊고 SurpriseHopSec 동안 SurpriseHopHeight만큼 제자리에서 점프한 뒤(점프 프레임) 대기(달리기 중이면 달리기)로 돌아간다.
+        /// 머리 위(발 기준 SurpriseMarkOffsetY)에 "!"를 SurpriseMarkSec 동안 보여 준다. 방향(Face)은 바꾸지 않는다. 시간은 Advance(dt)가 진행한다.
+        /// </summary>
+        public void PlaySurprise()
+        {
+            StartReaction(Reaction.Surprise, jump[0], GameConfig.SurpriseHopSec);
+            surpriseMarkActive = true;
+            surpriseMarkElapsed = 0f;
+            surpriseMarkRenderer.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// 놀람을 끝낸다(카운트다운 "1"): 놀람 점프(Reaction.Surprise)가 진행 중이면 끊고 바닥의 대기(달리기 중이면 달리기) 프레임으로 돌리며, "!"는 숨긴다.
+        /// 놀람이 아니면(다른 동작·반응·납작함 중) 그것은 건드리지 않고 "!"만 숨긴다.
+        /// </summary>
+        public void EndSurprise()
+        {
+            HideSurpriseMark();
+            if (reaction == Reaction.Surprise) EndAction();
+        }
+
+        /// <summary>
+        /// 잡힘 강타(8.3): 동작·반응을 취소하고 맞음 프레임(PlayerHit, 납작)을 다음 ResetPose·SetRunning까지 계속 보여 준다.
+        /// 바닥에 두고, 새 DoAction·PlayHit·PlayStumble·PlaySurprise도 납작함을 푼다.
+        /// </summary>
+        public void ShowFlattened()
+        {
+            StartReaction(Reaction.None, hitFrame, 0f);
+            flattened = true;
+        }
+
+        /// <summary>렌더러(몸·음파·놀람 표시)를 보이거나 숨긴다(탈출 문 진입). ResetPose가 보이게 되돌린다.</summary>
+        public void SetVisible(bool v)
+        {
+            body.enabled = v;
+            waveRenderer.enabled = v;
+            surpriseMarkRenderer.enabled = v;
+        }
+
         /// <summary>동작을 끊고(음파 숨김, y는 바닥) 한 장짜리 반응 프레임을 고정한다. Play는 프레임을 처음부터 다시 돌리므로 SetFrame을 쓴다.</summary>
         void StartReaction(Reaction r, Sprite frame, float duration)
         {
+            flattened = false;
             action = null;
             actionElapsed = 0f;
             jumpFalling = false;
@@ -233,16 +335,30 @@ namespace NoiseRun
             ShowBaseAnimation();
         }
 
-        /// <summary>진행 중인 동작·반응을 끊고 음파 이펙트를 숨기며 y를 바닥에 두고 대기 프레임으로 돌린다(레벨 정리 때 GameFlow가 부른다).</summary>
+        /// <summary>
+        /// 진행 중인 동작·반응·놀람·납작함을 끊고 음파·"!"를 숨기며 y를 바닥에 두고 대기 프레임으로 돌린다.
+        /// 달리기 애니 속도는 1로, 렌더러는 보이게 되돌린다(레벨 정리 때 GameFlow가 부른다).
+        /// </summary>
         public void ResetPose()
         {
             running = false;
+            runAnimScale = 1f;
+            flattened = false;
+            HideSurpriseMark();
+            SetVisible(true);
             EndAction();
+        }
+
+        void HideSurpriseMark()
+        {
+            surpriseMarkActive = false;
+            surpriseMarkElapsed = 0f;
+            surpriseMarkRenderer.gameObject.SetActive(false);
         }
 
         void ShowBaseAnimation()
         {
-            if (running) animator.Play(run, GameConfig.RunAnimFps, true);
+            if (running) animator.Play(run, GameConfig.RunAnimFps * runAnimScale, true);
             else animator.Play(idle, 0f, false);
         }
 
@@ -260,8 +376,25 @@ namespace NoiseRun
 
         float CurrentJumpHeight()
         {
+            if (reaction == Reaction.Surprise) return SurpriseHop(reactionElapsed / reactionDuration);
             if (action != ActionType.Jump) return 0f;
             return JumpCurve(actionElapsed / actionDuration);
+        }
+
+        static float SurpriseHop(float u)
+        {
+            return GameConfig.SurpriseHopHeight * Mathf.Sin(Mathf.PI * Mathf.Clamp01(u));
+        }
+
+        /// <summary>놀람 점프의 높이를 적용하고, 정점을 지나면 하강 프레임으로 바꾼다(프레임이 바뀔 때만 SetFrame).</summary>
+        void ApplySurpriseHop(float u)
+        {
+            ApplyPosition(SurpriseHop(u));
+            if (!jumpFalling && u >= 0.5f && jump.Length > 1)
+            {
+                jumpFalling = true;
+                animator.SetFrame(jump[jump.Length - 1]);
+            }
         }
 
         static float JumpCurve(float u)

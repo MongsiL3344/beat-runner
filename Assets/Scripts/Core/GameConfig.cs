@@ -103,7 +103,7 @@ namespace NoiseRun
         public const float ActionBeatFactor = 0.9f;
         /// <summary>곡 끝 위치에서 비상구까지(유닛).</summary>
         public const float ExitDistanceAfterEnd = 3f;
-        /// <summary>카운트다운 3·2·1 각 표시 시간(초). T5 임시 직행은 숫자 없이 ×3만큼 기다린다.</summary>
+        /// <summary>카운트다운 3·2·1 각 표시 시간(초). 시작 카운트다운(곡 시간 음수 구간)과 일시정지 재개 카운트다운이 같이 쓴다.</summary>
         public const float CountdownStepSec = 0.7f;
 
         /// <summary>Bootstrap이 카메라를 새로 만들 때의 z 위치(2D 템플릿 기본값).</summary>
@@ -220,9 +220,15 @@ namespace NoiseRun
         public const int SortOrderChaser = 3;
         public const int SortOrderPlayer = 4;
         public const int SortOrderEffect = 5;
-        /// <summary>카운트다운 단계 수(3·2·1). 곡 시작 전 대기 = CountdownStepSec × CountdownSteps이고, 그동안 주인공은 x &lt; 0에서 달린다.</summary>
+        /// <summary>
+        /// 카운트다운 단계 수(3·2·1). 곡 시작 전 대기 = CountdownStepSec × CountdownSteps이고, 그동안 주인공은 x=0에 서 있다(T8, 8.1).
+        /// 일시정지 뒤 재개(Resuming)의 3·2·1도 같은 단계 수·간격을 쓴다.
+        /// </summary>
         public const int CountdownSteps = 3;
-        /// <summary>곡 시간 0 이전 주인공이 달리는 거리(유닛).</summary>
+        /// <summary>
+        /// 카운트다운 길이만큼의 거리(유닛). T5 때 주인공이 곡 시작 전에 달려오던 거리였고, T8부터 주인공은 x=0에 서 있지만
+        /// 복도를 시작선 왼쪽으로 이만큼 더 깔아 이웃이 걸어 들어오는 화면 왼쪽 밖과 미리보기 시작 구도를 덮는 데 계속 쓴다.
+        /// </summary>
         public const float LeadInDistanceUnits = CountdownStepSec * CountdownSteps * ScrollSpeed;
         /// <summary>복도를 시작선 왼쪽(LeadInDistanceUnits 더 왼쪽)과 비상구 오른쪽으로 더 까는 여유(유닛). 카메라가 주인공 40% 위치라 왼쪽 0.4폭·오른쪽 0.6폭이 보이므로 21:9 와이드(폭 약 39유닛)도 덮는 값.</summary>
         public const float LevelMarginUnits = 32f;
@@ -287,6 +293,69 @@ namespace NoiseRun
         public const float ChaserLerpTau = 0.07f;
         /// <summary>[Chaser] 거리 로그를 남기는 곡 시간 간격(초). Miss·헛박자·밀어내기·잡힘은 그때마다 따로 남긴다.</summary>
         public const double ChaserLogIntervalSec = 1.0;
+
+        // ── 연출 (T8, 8절). 사용자 결정(T8 작업 전): 미리보기 동안 이웃 숨김, 카운트다운 동안 주인공은 x=0에 서 있고
+        //    "3"에 이웃이 화면 왼쪽 밖에서 걸어 들어오고 "2"에 주인공이 왼쪽을 보고 놀라며 "1"에 다시 오른쪽을 본다. ──
+        /// <summary>미리보기 1구간: 시작 위치의 주인공 비춤(초).</summary>
+        public const float PreviewHoldStartSec = 1.0f;
+        /// <summary>미리보기 2구간: 비상구까지 훑기(초, easeInOutCubic).</summary>
+        public const float PreviewFlySec = 2.5f;
+        /// <summary>미리보기 3구간: 비상구에서 멈춤(초).</summary>
+        public const float PreviewHoldEndSec = 0.4f;
+        /// <summary>미리보기 4구간: 시작 위치로 복귀(초, easeInOutCubic).</summary>
+        public const float PreviewReturnSec = 0.8f;
+        /// <summary>곡 시작과 함께 "GO"를 띄우는 시간(초).</summary>
+        public const float GoTextSec = 0.5f;
+        /// <summary>카운트다운 "3" 동안 이웃이 걸어 들어오기 시작하는 거리(유닛). 주인공 왼쪽은 6.0유닛만 보이고 이웃 반폭이 약 1.75유닛이라 완전히 화면 밖.</summary>
+        public const float ChaserWalkInStartDistance = 8.0f;
+        /// <summary>이웃이 ChaserWalkInStartDistance에서 ChaserStartDistance까지 걸어 들어오는 시간(초). "3" 한 칸.</summary>
+        public const float ChaserWalkInSec = CountdownStepSec;
+        /// <summary>놀람: 제자리 작은 점프 시간(초)과 높이(유닛, 8px).</summary>
+        public const float SurpriseHopSec = 0.3f;
+        public const float SurpriseHopHeight = 0.5f;
+        /// <summary>놀람: 머리 위 "!" 표시 시간(초). "2" 한 칸.</summary>
+        public const float SurpriseMarkSec = CountdownStepSec;
+        /// <summary>"!" 표시의 주인공 발 기준 y 오프셋(유닛). 주인공 키 1유닛 바로 위.</summary>
+        public const float SurpriseMarkOffsetY = 1.25f;
+        /// <summary>탈출: 도착 몇 초 전 문 열림 / 도착 뒤 숨김까지 / 숨긴 뒤 문 닫힘까지 / "탈출 성공!" 표시(초).</summary>
+        public const float EscapeDoorOpenSec = 0.2f;
+        public const float EscapeEnterSec = 0.3f;
+        public const float EscapeDoorCloseSec = 0.2f;
+        public const float EscapeBannerSec = 1.5f;
+        /// <summary>잡힘 1구간 감속(초). 주인공 속도 ScrollSpeed → 0(easeOut), 달리기 프레임 속도도 같이 줄고 음악은 같은 시간 동안 페이드아웃.</summary>
+        public const float CaughtSlowSec = 0.6f;
+        /// <summary>잡힘 2구간 마주봄(초). 시작 0.2초 뒤(잡힘 기준 0.8초) 주인공이 왼쪽을 본다.</summary>
+        public const float CaughtStareSec = 0.8f;
+        public const float CaughtTurnDelaySec = 0.2f;
+        /// <summary>잡힘 3구간 빗자루 들어올림(초).</summary>
+        public const float CaughtWindupSec = 0.3f;
+        /// <summary>강타 순간 정지(초, 실시간).</summary>
+        public const float CaughtHitStopSec = 0.08f;
+        /// <summary>강타 화면 흔들림 진폭(유닛)과 시간(초).</summary>
+        public const float CaughtShakeAmp = 0.5f;
+        public const float CaughtShakeSec = 0.4f;
+        /// <summary>잡힘 5구간 여운(초): 휘두르기 3프레임 유지(강타 1.7초 → 2.4초).</summary>
+        public const float CaughtLingerSec = 0.7f;
+        /// <summary>"GAME OVER" 표시(초).</summary>
+        public const float GameOverHoldSec = 1.6f;
+        /// <summary>강타 때 마주 선 간격(유닛, 24px). 휘두르기 프레임의 솔이 이 거리의 납작한 주인공 머리에 닿게 그렸다(9.3).</summary>
+        public const float ChaserStandOffset = ChaserCatchDistance;
+        /// <summary>감속·마주봄 동안의 간격(유닛, 28px). 사용자 결정(T8): 대기 프레임 몸이 24px에서 약 3px 겹쳐서 넓혀 서고, 들어올림 때 ChaserStandOffset으로 한 걸음 다가선다.</summary>
+        public const float ChaserFaceOffset = 1.75f;
+        /// <summary>결과 화면 반투명 패널의 불투명도. 사용자 결정(T8): 마지막 장면 위에 덮는다.</summary>
+        public const float ResultPanelAlpha = 0.65f;
+        /// <summary>일시정지 화면 어두운 패널의 불투명도(게임 장면이 비치게 반투명).</summary>
+        public const float PausePanelAlpha = 0.5f;
+        /// <summary>일시정지 화면 제목·안내 줄의 가운데 y(480×270 기준·화면 중앙이 0·위쪽이 +). 주인공(약 −17~−47)과 머리 위에 멈춰 있는 판정 문구(약 +20~+50)를 피해 그 위에 둔다(T8 스크린샷: 70/40이면 "PERFECT"와 안내 줄이 겹침).</summary>
+        public const float UiPauseTitleY = 90f;
+        public const float UiPauseHintY = 62f;
+        /// <summary>결과 화면 줄 가운데 y: 제목 / 곡 이름 / 난이도 / 점수 / Perfect·Good·Miss / 최대 콤보. 안내 줄은 UiFooterY(아래쪽).</summary>
+        public const float UiResultTitleY = 92f;
+        public const float UiResultSongY = 54f;
+        public const float UiResultDifficultyY = 30f;
+        public const float UiResultScoreY = 6f;
+        public const float UiResultJudgeY = -20f;
+        public const float UiResultComboY = -40f;
 
         // ── HUD (T6, 480×270 기준·화면 중앙이 0·위쪽이 +) ──
         /// <summary>판정 문구 표시 시간(초).</summary>

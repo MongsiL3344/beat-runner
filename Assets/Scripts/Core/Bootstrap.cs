@@ -4,7 +4,7 @@ using UnityEngine.UI;
 namespace NoiseRun
 {
     /// <summary>
-    /// 자동 시작, 카메라·Canvas·Conductor·레벨·주인공·카메라 연출·HUD·타이밍 바·GameFlow 생성. 만든 오브젝트는 모두 이 GameObject 아래에 두어
+    /// 자동 시작, 카메라·Canvas·Conductor·레벨·주인공·추격자·카메라 연출·HUD·타이밍 바·GameFlow 생성. 만든 오브젝트는 모두 이 GameObject 아래에 두어
     /// Restart 때 한꺼번에 제거된다(씬의 Main Camera는 건드리지 않는다).
     /// </summary>
     public sealed class Bootstrap : MonoBehaviour
@@ -16,6 +16,7 @@ namespace NoiseRun
         public Canvas Canvas { get; private set; }
         public LevelBuilder Level { get; private set; }
         public PlayerController Player { get; private set; }
+        public ChaserController Chaser { get; private set; }
         public CameraDirector CameraDirector { get; private set; }
         public Hud Hud { get; private set; }
         public BeatBarUI BeatBar { get; private set; }
@@ -50,6 +51,7 @@ namespace NoiseRun
                 Debug.LogWarning("DevOptions: startAt=" + startAt + " 은(는) 아직 지원하지 않습니다. 기본 동작(분석 후 Playing)으로 진행합니다.");
             b.Flow.DebugPreview = startAt == "debug";
             b.Flow.AutoPlay = DevOptions.AutoPlay;
+            b.Chaser.NoCatch = DevOptions.NoCatch;
 
             double? freezeAt = DevOptions.FreezeAt;
             if (freezeAt.HasValue)
@@ -108,11 +110,13 @@ namespace NoiseRun
             Canvas = CreateCanvas();
             Conductor = CreateConductor();
 
-            // 레벨·주인공·카메라 연출은 이 GameObject 아래에 만들어 Restart 때 함께 제거된다.
-            // CameraDirector는 별도 오브젝트라 씬 카메라에는 컴포넌트가 붙지 않는다. 주인공은 Playing에 들어갈 때만 보인다.
+            // 레벨·주인공·추격자·카메라 연출은 이 GameObject 아래에 만들어 Restart 때 함께 제거된다.
+            // CameraDirector는 별도 오브젝트라 씬 카메라에는 컴포넌트가 붙지 않는다. 주인공·추격자는 Playing에 들어갈 때만 보인다.
             Level = LevelBuilder.Create(transform);
             Player = PlayerController.Create(transform);
             Player.gameObject.SetActive(false);
+            Chaser = ChaserController.Create(transform);
+            Chaser.gameObject.SetActive(false);
             CameraDirector = CameraDirector.Create(cam, transform);
 
             menus = new MenuScreens(Canvas.transform);
@@ -122,7 +126,7 @@ namespace NoiseRun
             Hud.Follow(Player.transform, cam);
             BeatBar = BeatBarUI.Create(Canvas.transform);
             Flow = gameObject.AddComponent<GameFlow>();
-            Flow.Init(Conductor, menus, debugView, Level, Player, CameraDirector, Hud, BeatBar);
+            Flow.Init(Conductor, menus, debugView, Level, Player, Chaser, CameraDirector, Hud, BeatBar);
         }
 
         void OnDestroy()

@@ -262,6 +262,32 @@ namespace NoiseRun
         /// <summary>날아가는 동안 도는 각도(도, 음수 = 시계 방향).</summary>
         public const float DoorBlownSpinDeg = -90f;
 
+        // ── 추격자 (T7, 7절) ──
+        // 사용자 결정(T7 작업 전): 줌 0.5에서 주인공 왼쪽은 6.0유닛(반폭 7.5 × 0.8)만 보인다. 잡힘 거리를 ChaserStandOffset(1.5, 몸이 막 닿는 거리)로,
+        // 시작 4.5(온몸 보임)·상한 6.0(화면 왼쪽 끝, 반쯤 보임)으로 두고, 나머지는 여유폭 비율 3/8(명세 처음 값 시작 8·잡힘 0 대비)로 줄였다.
+        // 그래서 균형(시작에서 Miss 8번이면 잡힘, 7.2 계산)은 처음 값과 같다.
+        /// <summary>시작 거리(유닛). 화면상 이웃 x = 주인공 x − 표시 거리.</summary>
+        public const float ChaserStartDistance = 4.5f;
+        /// <summary>밀어내기 상한(유닛). 화면 왼쪽 끝(이웃 몸 절반이 보임).</summary>
+        public const float ChaserMaxDistance = 6.0f;
+        /// <summary>곡 시작·끝의 접근 속도(유닛/초). 그 사이는 곡 진행률에 비례(7.1).</summary>
+        public const float ChaserCloseSpeedStart = 0.0075f;
+        public const float ChaserCloseSpeedEnd = 0.03f;
+        /// <summary>Miss·헛박자 때 즉시 접근하는 거리(유닛).</summary>
+        public const float ChaserMissApproach = 0.375f;
+        public const float ChaserOffBeatApproach = 0.375f;
+        /// <summary>밀어내기 시점 콤보. 마지막 값 이후는 ComboMilestoneRepeat의 배수마다(200, 300, ...).</summary>
+        public static readonly int[] ComboMilestones = { 10, 25, 50, 100 };
+        public const int ComboMilestoneRepeat = 100;
+        /// <summary>콤보 마일스톤마다 밀어내는 거리(유닛). 결과는 ChaserMaxDistance를 넘지 않는다.</summary>
+        public const float ChaserMilestonePush = 0.75f;
+        /// <summary>이 거리 이하면 잡힘(유닛). 거리는 이 값 아래로 내려가지 않는다. 8.3 마주봄 간격 ChaserStandOffset과 같은 값(24px).</summary>
+        public const float ChaserCatchDistance = 1.5f;
+        /// <summary>표시 거리 추종 시간 상수(초). "확 다가옴"이 0.2초 안팎으로 보이게.</summary>
+        public const float ChaserLerpTau = 0.07f;
+        /// <summary>[Chaser] 거리 로그를 남기는 곡 시간 간격(초). Miss·헛박자·밀어내기·잡힘은 그때마다 따로 남긴다.</summary>
+        public const double ChaserLogIntervalSec = 1.0;
+
         // ── HUD (T6, 480×270 기준·화면 중앙이 0·위쪽이 +) ──
         /// <summary>판정 문구 표시 시간(초).</summary>
         public const float JudgeTextSec = 0.5f;

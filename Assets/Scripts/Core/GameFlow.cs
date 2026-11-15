@@ -11,7 +11,8 @@ namespace NoiseRun
     /// <summary>
     /// 상태 머신과 입력 분배. 입력은 Update에서 Keyboard.current로만 읽고,
     /// 한 프레임의 입력은 그 프레임 시작 시점의 상태 하나에서만 처리한다. 화면 그리기는 MenuScreens·AnalysisDebugView가 맡는다.
-    /// T5~T6 범위: Title, SelectFile(+Songs 목록, ←/→ 난이도), Analyzing(로딩 → 분석), Playing(분석 직후 곧바로 진입하는 임시 흐름: 레벨·주인공 달리기·카메라 추적·박자 판정·HUD·타이밍 바).
+    /// T5~T7 범위: Title, SelectFile(+Songs 목록, ←/→ 난이도), Analyzing(로딩 → 분석), Playing(분석 직후 곧바로 진입하는 임시 흐름: 레벨·주인공 달리기·카메라 추적·박자 판정·HUD·타이밍 바·추격자),
+    /// Caught(T7 임시: 음악·화면이 멈춘 채 Esc를 기다림. 8.3 연출은 T8).
     /// startAt=debug이면 분석 뒤 Playing 대신 Preview(분석 디버그 화면을 띄우고 곡을 처음부터 재생)로 간다.
     /// </summary>
     public sealed class GameFlow : MonoBehaviour
@@ -53,6 +54,9 @@ namespace NoiseRun
         /// <summary>박자 판정기(6.2). GameFlow가 만들어 Init에서 한 번 구독하며, Playing에 들어갈 때마다 Reset한다.</summary>
         public RhythmJudge Judge { get; } = new RhythmJudge();
 
+        /// <summary>추격자(7절). Bootstrap이 만들어 Init으로 넘기며, Playing에 들어갈 때마다 ResetChase한다.</summary>
+        public ChaserController Chaser => chaser;
+
         Conductor conductor;
         MenuScreens menus;
         AnalysisDebugView debugView;
@@ -61,6 +65,7 @@ namespace NoiseRun
         CameraDirector cameraDirector;
         Hud hud;
         BeatBarUI beatBar;
+        ChaserController chaser;
 
         Difficulty currentDifficulty = GameConfig.DefaultDifficulty;
         int nextAutoNote;      // 다음에 지나갈 노트(Map.notes 인덱스)
@@ -81,7 +86,7 @@ namespace NoiseRun
         AnalysisOutput output;
 
         internal void Init(Conductor conductorToUse, MenuScreens menuScreens, AnalysisDebugView debugViewToUse,
-            LevelBuilder levelToUse, PlayerController playerToUse, CameraDirector cameraDirectorToUse,
+            LevelBuilder levelToUse, PlayerController playerToUse, ChaserController chaserToUse, CameraDirector cameraDirectorToUse,
             Hud hudToUse, BeatBarUI beatBarToUse)
         {
             conductor = conductorToUse;
@@ -89,10 +94,12 @@ namespace NoiseRun
             debugView = debugViewToUse;
             level = levelToUse;
             player = playerToUse;
+            chaser = chaserToUse;
             cameraDirector = cameraDirectorToUse;
             hud = hudToUse;
             beatBar = beatBarToUse;
             Judge.Judged += OnJudged;
+            chaser.Caught += OnCaught;
             menus.Difficulty = currentDifficulty;
             Render();
         }
@@ -179,6 +186,9 @@ namespace NoiseRun
                 case GameState.Playing:
                     if (kb.escapeKey.wasPressedThisFrame) ExitPlaying();
                     else HandlePlayingKeys(kb);
+                    break;
+                case GameState.Caught:
+                    if (kb.escapeKey.wasPressedThisFrame) ExitPlaying();
                     break;
             }
         }
@@ -295,7 +305,7 @@ namespace NoiseRun
         }
 
         /// <summary>
-        /// Playing 종료(T5 임시: 일시정지 없이 Esc로 바로 나간다. T8에서 Paused가 생긴다).
+        /// Playing·Caught 종료(T5 임시: 일시정지 없이 Esc로 바로 나간다. T8에서 Paused와 결과 화면이 생긴다).
         /// 음악 정지, 레벨 정리, 클립 해제, 파일 선택으로.
         /// </summary>
         void ExitPlaying()
@@ -324,17 +334,24 @@ namespace NoiseRun
 
             player.gameObject.SetActive(true);
             player.Face(true);
-            player.SetX(Mathf.Min(level.TimeToX(conductor.SongTime), level.ExitX));
+            float x = Mathf.Min(level.TimeToX(conductor.SongTime), level.ExitX);
+            player.SetX(x);
             player.SetRunning(true);
             playerRunning = true;
+
+            chaser.ResetChase();
+            chaser.gameObject.SetActive(true);
+            chaser.SetRunning(true);
+            chaser.Tick(conductor.SongTime, Map.songLength, 0f, x);
+
             cameraDirector.Follow(player.transform);
 
             ChangeState(GameState.Playing);
         }
 
         /// <summary>
-        /// 판정 결과를 주인공 반응·문 날리기·HUD로 나눠 보낸다(6.3). 판정기가 점수·콤보를 먼저 갱신하므로 여기서 읽으면 새 값이다.
-        /// Perfect/Good/EmptyBeat는 누른 동작 애니메이션, 오답·놓침(Miss)은 피격, OffBeat는 휘청거림이다.
+        /// 판정 결과를 주인공 반응·문 날리기·추격자·HUD로 나눠 보낸다(6.3, 7.1). 판정기가 점수·콤보를 먼저 갱신하므로 여기서 읽으면 새 값이다.
+        /// Perfect/Good/EmptyBeat는 누른 동작 애니메이션, 오답·놓침(Miss)은 피격 + 추격자 접근, OffBeat는 휘청거림 + 추격자 접근이다.
         /// </summary>
         void OnJudged(JudgeEvent e)
         {
@@ -347,23 +364,40 @@ namespace NoiseRun
                     break;
                 case Judgement.Miss:
                     player.PlayHit();
+                    chaser.Approach(GameConfig.ChaserMissApproach);
                     break;
                 case Judgement.OffBeat:
                     player.PlayStumble();
+                    chaser.Approach(GameConfig.ChaserOffBeatApproach);
                     break;
             }
 
             level.OnJudged(e);
+            chaser.OnComboChanged(Judge.Combo);
             hud.SetScore(Judge.Score);
             hud.SetCombo(Judge.Combo);
             hud.ShowJudgement(e.judgement);
         }
 
         /// <summary>
+        /// 잡힘(T7 임시. 8.3 감속·마주봄·강타 연출과 결과 화면은 T8): 곡 시계와 음악을 멈추고 주인공·이웃을 그 자리에서 대기 프레임으로 세운 뒤
+        /// Caught 상태에서 Esc를 기다린다. 레벨·HUD·타이밍 바는 멈춘 화면 그대로 남는다.
+        /// </summary>
+        void OnCaught()
+        {
+            if (State != GameState.Playing) return;
+            conductor.Pause();
+            player.SetRunning(false);
+            playerRunning = false;
+            chaser.SetRunning(false);
+            ChangeState(GameState.Caught);
+        }
+
+        /// <summary>
         /// Playing 한 프레임: 주인공 x를 곡 시간에 맞추고(비상구에서 멈춤), 지나간 노트마다 커서를 전진시키며 autoPlay면 아직 판정되지 않은 노트에
-        /// 정답 동작을 판정기로 넣는다. 마지막에 Judge.Tick으로 놓친 노트를 Miss 처리한다.
-        /// Update가 Conductor.SongTime과 Time.deltaTime으로 부르며, 테스트는 시계를 올리고 직접 부른다.
-        /// 추격자·종료 조건은 T7~T8에서 여기에 붙는다.
+        /// 정답 동작을 판정기로 넣는다. 그다음 Judge.Tick으로 놓친 노트를 Miss 처리하고, 마지막에 추격자를 진행시킨다(잡히면 이 안에서 Caught로 바뀐다).
+        /// 곡이 끝나면 이웃은 곡 끝 시각의 주인공 위치 기준에서 멈춘다(8.2). Update가 Conductor.SongTime과 Time.deltaTime으로 부르며, 테스트는 시계를 올리고 직접 부른다.
+        /// 탈출 종료 조건은 T8에서 여기에 붙는다.
         /// </summary>
         public void Step(double songTime, float dt)
         {
@@ -396,9 +430,14 @@ namespace NoiseRun
             }
 
             Judge.Tick(songTime);
+
+            bool songRunning = songTime < Map.songLength;
+            chaser.SetRunning(songRunning);
+            float chaserAnchorX = songRunning ? x : Mathf.Min(level.TimeToX(Map.songLength), exitX);
+            chaser.Tick(songTime, Map.songLength, dt, chaserAnchorX);
         }
 
-        /// <summary>레벨 오브젝트와 주인공·카메라 추적·HUD·타이밍 바를 정리한다. 여러 번 불러도 된다.</summary>
+        /// <summary>레벨 오브젝트와 주인공·추격자·카메라 추적·HUD·타이밍 바를 정리한다. 여러 번 불러도 된다.</summary>
         void ClearLevel()
         {
             if (cameraDirector != null) cameraDirector.Follow(null);
@@ -406,6 +445,12 @@ namespace NoiseRun
             {
                 player.ResetPose();
                 player.gameObject.SetActive(false);
+            }
+            if (chaser != null)
+            {
+                chaser.SetRunning(false);
+                chaser.ResetChase();
+                chaser.gameObject.SetActive(false);
             }
             if (level != null) level.Clear();
             if (hud != null)

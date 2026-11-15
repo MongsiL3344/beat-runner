@@ -31,7 +31,7 @@ namespace NoiseRun
         /// <summary>autoPlay 키 값(true면 Playing에서 노트 시각마다 정답 동작을 자동 실행). 없거나 true/false가 아니면 false.</summary>
         public static bool AutoPlay { get; private set; }
 
-        /// <summary>noCatch 키 값(true면 추격자가 잡지 않음, T7에서 사용). 없거나 true/false가 아니면 false.</summary>
+        /// <summary>noCatch 키 값(true면 추격자가 잡지 않음. Bootstrap이 ChaserController.NoCatch에 넣는다). 없거나 true/false가 아니면 false.</summary>
         public static bool NoCatch { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

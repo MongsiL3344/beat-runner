@@ -38,6 +38,8 @@ namespace NoiseRun.Tests
         {
             clock = new FakeSongClock();
             Bootstrap.Restart(clock);
+            // These tests cover running, judging and the HUD; long no-input steps would otherwise end the run in Caught (T7, ChaserTests).
+            Bootstrap.Instance.Chaser.NoCatch = true;
         }
 
         [TearDown]

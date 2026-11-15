@@ -15,6 +15,9 @@ namespace NoiseRun
         public Conductor Conductor { get; private set; }
         public Canvas Canvas { get; private set; }
 
+        MenuScreens menus;
+        AnalysisDebugView debugView;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
@@ -31,6 +34,23 @@ namespace NoiseRun
 
             // 개발 옵션은 AutoStart 경로에서만 적용한다(Restart는 적용하지 않음).
             DevOptions.Load();
+            ApplyDevOptions(b);
+        }
+
+        static void ApplyDevOptions(Bootstrap b)
+        {
+            // T3에서는 분석이 끝나면 곧바로 디버그 화면이 뜨므로 startAt은 debug만 의미가 있다.
+            string startAt = DevOptions.StartAt;
+            if (startAt != null && startAt != "debug")
+                Debug.LogWarning("DevOptions: startAt=" + startAt + " 은(는) 아직 지원하지 않습니다. 기본 동작(분석 후 디버그 화면)으로 진행합니다.");
+
+            double? freezeAt = DevOptions.FreezeAt;
+            if (freezeAt.HasValue)
+            {
+                b.Conductor.Clock = new FakeSongClock { Time = freezeAt.Value };
+                b.Conductor.FrozenSongTime = freezeAt;
+            }
+
             string file = DevOptions.AutoFile;
             if (!string.IsNullOrEmpty(file)) b.Flow.StartFromFile(file);
         }
@@ -69,8 +89,10 @@ namespace NoiseRun
             Canvas = CreateCanvas();
             Conductor = CreateConductor();
 
+            menus = new MenuScreens(Canvas.transform);
+            debugView = AnalysisDebugView.Create(Canvas.transform);
             Flow = gameObject.AddComponent<GameFlow>();
-            Flow.Init(Conductor, Canvas.transform);
+            Flow.Init(Conductor, menus, debugView);
         }
 
         void OnDestroy()

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
+using System.Globalization;
 using System.IO;
 #endif
 
@@ -8,25 +9,36 @@ namespace NoiseRun
 {
     /// <summary>
     /// 개발·검증용 옵션. Editor에서만 &lt;프로젝트&gt;/Temp/noiserun_dev.txt(줄마다 키=값)를 읽는다.
-    /// 빌드에서는 파일을 읽지 않고 모두 기본값이다. T1은 file 키만 인식한다.
+    /// 빌드에서는 파일을 읽지 않고 모두 기본값(null)이다. 인식하는 키: file, startAt, freezeAt.
     /// </summary>
     public static class DevOptions
     {
-        static readonly HashSet<string> KnownKeys = new HashSet<string> { "file" };
+        static readonly HashSet<string> KnownKeys = new HashSet<string> { "file", "startAt", "freezeAt" };
+        static readonly HashSet<string> StartAtValues = new HashSet<string> { "title", "preview", "playing", "debug" };
 
         /// <summary>Load 후 file 키 값. 없으면 null.</summary>
         public static string AutoFile { get; private set; }
+
+        /// <summary>startAt 키 값(title, preview, playing, debug). 없거나 모르는 값이면 null.</summary>
+        public static string StartAt { get; private set; }
+
+        /// <summary>freezeAt 키 값(곡 시간 고정, 초). 없거나 숫자가 아니면 null.</summary>
+        public static double? FreezeAt { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
             AutoFile = null;
+            StartAt = null;
+            FreezeAt = null;
         }
 
         /// <summary>옵션 파일을 읽는다. 파일을 읽었으면 true. 빌드에서는 항상 false.</summary>
         public static bool Load()
         {
             AutoFile = null;
+            StartAt = null;
+            FreezeAt = null;
 #if UNITY_EDITOR
             string path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Temp", "noiserun_dev.txt"));
             if (!File.Exists(path)) return false;
@@ -52,11 +64,33 @@ namespace NoiseRun
                 }
 
                 if (key == "file") AutoFile = value.Length == 0 ? null : value;
+                else if (key == "startAt") StartAt = ParseStartAt(value);
+                else if (key == "freezeAt") FreezeAt = ParseFreezeAt(value);
             }
             return true;
 #else
             return false;
 #endif
         }
+
+#if UNITY_EDITOR
+        static string ParseStartAt(string value)
+        {
+            if (value.Length == 0) return null;
+            if (StartAtValues.Contains(value)) return value;
+            Debug.LogWarning("DevOptions: startAt 값 '" + value + "' 을(를) 알 수 없습니다(title, preview, playing, debug)");
+            return null;
+        }
+
+        static double? ParseFreezeAt(string value)
+        {
+            if (value.Length == 0) return null;
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds)
+                && !double.IsNaN(seconds) && !double.IsInfinity(seconds))
+                return seconds;
+            Debug.LogWarning("DevOptions: freezeAt 값 '" + value + "' 은(는) 숫자가 아닙니다");
+            return null;
+        }
+#endif
     }
 }

@@ -21,6 +21,12 @@ namespace NoiseRun
 
         public double SongTime => Clock.SongTime;
 
+        /// <summary>
+        /// 개발 옵션 freezeAt용. 값이 있고 시계가 FakeSongClock이면 ScheduleStart가 시계를 0으로 되돌리지 않고
+        /// 이 값으로 곡 시간을 유지한다. 재생 소리는 그대로 나온다.
+        /// </summary>
+        public double? FrozenSongTime { get; set; }
+
         public double SongLength => (source != null && source.clip != null) ? source.clip.length : 0.0;
 
         AudioSource Source
@@ -71,6 +77,7 @@ namespace NoiseRun
             else
             {
                 Clock.Start(delaySec);
+                if (FrozenSongTime.HasValue && Clock is FakeSongClock fake) fake.Time = FrozenSongTime.Value;
                 startDsp = AudioSettings.dspTime + delaySec;
             }
             s.PlayScheduled(startDsp);

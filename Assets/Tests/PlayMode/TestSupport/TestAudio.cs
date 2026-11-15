@@ -39,6 +39,21 @@ namespace NoiseRun.Tests
             return samples;
         }
 
+        /// <summary>
+        /// Interleaved 2-channel version of a mono signal. A channel that is switched off stays silent,
+        /// so (true, true) is a dual-mono file and (true, false) a file with signal in the left channel only.
+        /// </summary>
+        public static float[] ToInterleavedStereo(float[] mono, bool left, bool right)
+        {
+            var stereo = new float[mono.Length * 2];
+            for (int i = 0; i < mono.Length; i++)
+            {
+                if (left) stereo[2 * i] = mono[i];
+                if (right) stereo[2 * i + 1] = mono[i];
+            }
+            return stereo;
+        }
+
         public static AudioClip ToClip(float[] mono, int sampleRate)
         {
             var clip = AudioClip.Create("TestAudio", mono.Length, 1, sampleRate, false);

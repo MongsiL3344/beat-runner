@@ -497,5 +497,219 @@ namespace NoiseRun.Tests
             Assert.IsFalse(wave.gameObject.activeSelf);
             Assert.IsNull(player.CurrentAction);
         }
+
+        // ── 판정 반응: 방화문 날리기 (T6) ──
+
+        const int BoxNote = 0;
+        const int LaundryNote = 1;
+        const int DoorNote = 2; // DefaultMap의 노트 순서
+
+        [TestCase(Judgement.Perfect)]
+        [TestCase(Judgement.Good)]
+        public void SuccessfulWaveOnDoor_SwapsToBlownSprite_FliesRightAndUp_ThenDeactivates(Judgement judgement)
+        {
+            LevelBuilder level = LevelBuilder.Create(root.transform);
+            level.Build(DefaultMap());
+            Transform door = level.ObstacleFor(DoorNote);
+            SpriteRenderer renderer = door.GetComponent<SpriteRenderer>();
+            Sprite closed = renderer.sprite;
+            Vector3 start = door.position;
+
+            level.OnJudged(new JudgeEvent(judgement, DoorNote, 0.0, ActionType.Wave));
+
+            Assert.AreNotEqual(closed, renderer.sprite, "부서진 문 스프라이트로 바뀌어야 합니다");
+            Assert.IsTrue(door.gameObject.activeSelf, "날아가는 동안에는 보여야 합니다");
+
+            level.Advance(GameConfig.DoorBlownSec / 2f);
+            Assert.Greater(door.position.x, start.x, "오른쪽으로 날아가야 합니다");
+            Assert.Greater(door.position.y, start.y, "위로 떠올라야 합니다");
+            Assert.IsTrue(door.gameObject.activeSelf);
+
+            level.Advance(GameConfig.DoorBlownSec);
+            Assert.IsFalse(door.gameObject.activeSelf, "다 날아가면 비활성화되어야 합니다");
+            Assert.AreEqual(start.x + GameConfig.DoorBlownDistanceUnits, door.position.x, Tolerance);
+            Assert.AreEqual(start.y + GameConfig.DoorBlownRiseUnits, door.position.y, Tolerance);
+            Assert.AreEqual(GameConfig.DoorBlownSpinDeg, Mathf.DeltaAngle(0f, door.eulerAngles.z), Tolerance);
+        }
+
+        [Test]
+        public void MissOnDoor_AndSuccessOnBoxOrLaundry_LeaveObstaclesUntouched()
+        {
+            LevelBuilder level = LevelBuilder.Create(root.transform);
+            level.Build(DefaultMap());
+            int count = level.GetComponentsInChildren<SpriteRenderer>(true).Length;
+
+            var events = new[]
+            {
+                new JudgeEvent(Judgement.Miss, DoorNote, 0.0, ActionType.Wave),
+                new JudgeEvent(Judgement.Perfect, BoxNote, 0.0, ActionType.Jump),
+                new JudgeEvent(Judgement.Good, LaundryNote, 0.0, ActionType.Slide),
+            };
+            int[] notes = { DoorNote, BoxNote, LaundryNote };
+
+            for (int i = 0; i < events.Length; i++)
+            {
+                Transform obstacle = level.ObstacleFor(notes[i]);
+                SpriteRenderer renderer = obstacle.GetComponent<SpriteRenderer>();
+                Sprite sprite = renderer.sprite;
+                Vector3 position = obstacle.position;
+
+                level.OnJudged(events[i]);
+                level.Advance(GameConfig.DoorBlownSec * 2f);
+
+                Assert.AreEqual(sprite, renderer.sprite, "스프라이트가 바뀌면 안 됩니다, 이벤트 " + i);
+                Assert.AreEqual(position, obstacle.position, "위치가 바뀌면 안 됩니다, 이벤트 " + i);
+                Assert.IsTrue(obstacle.gameObject.activeSelf, "비활성화되면 안 됩니다, 이벤트 " + i);
+            }
+            Assert.AreEqual(count, level.GetComponentsInChildren<SpriteRenderer>(true).Length);
+        }
+
+        [Test]
+        public void OnJudged_IgnoresNoteIndexOutOfRangeAndNonDoorJudgements()
+        {
+            LevelBuilder level = LevelBuilder.Create(root.transform);
+            level.OnJudged(new JudgeEvent(Judgement.Perfect, DoorNote, 0.0, ActionType.Wave)); // Build 전
+            level.Build(DefaultMap());
+            Transform door = level.ObstacleFor(DoorNote);
+            Vector3 start = door.position;
+
+            level.OnJudged(new JudgeEvent(Judgement.OffBeat, -1, 0.0, ActionType.Wave));
+            level.OnJudged(new JudgeEvent(Judgement.EmptyBeat, -1, 0.0, ActionType.Wave));
+            level.OnJudged(new JudgeEvent(Judgement.Perfect, -1, 0.0, ActionType.Wave));
+            level.OnJudged(new JudgeEvent(Judgement.Perfect, DefaultMap().notes.Count, 0.0, ActionType.Wave));
+            level.Advance(GameConfig.DoorBlownSec * 2f);
+
+            Assert.AreEqual(start, door.position);
+            Assert.IsTrue(door.gameObject.activeSelf);
+        }
+
+        [Test]
+        public void Clear_DropsFlyingDoors_AndAdvanceAfterwardsIsHarmless()
+        {
+            LevelBuilder level = LevelBuilder.Create(root.transform);
+            level.Build(DefaultMap());
+            level.OnJudged(new JudgeEvent(Judgement.Perfect, DoorNote, 0.0, ActionType.Wave));
+            level.Clear();
+
+            Assert.DoesNotThrow(() => level.Advance(GameConfig.DoorBlownSec));
+            level.OnJudged(new JudgeEvent(Judgement.Perfect, DoorNote, 0.0, ActionType.Wave));
+            Assert.IsNull(level.ObstacleFor(DoorNote));
+        }
+
+        // ── 판정 반응: 주인공 맞음·휘청 (T6) ──
+
+        [Test]
+        public void PlayHit_ShowsHitReactionOnFloor_AndReturnsToIdleAfterHitFlashSec()
+        {
+            PlayerController player = PlayerController.Create(root.transform);
+            SpriteRenderer body = player.GetComponent<SpriteRenderer>();
+            Sprite idle = body.sprite;
+            Assert.AreEqual(PlayerController.Reaction.None, player.CurrentReaction);
+
+            player.PlayHit();
+            Assert.AreEqual(PlayerController.Reaction.Hit, player.CurrentReaction);
+            Assert.IsNull(player.CurrentAction, "반응 중에는 동작이 없습니다");
+            Assert.AreEqual(GameConfig.FloorY, player.transform.position.y, Tolerance);
+            Assert.AreNotEqual(idle, body.sprite, "맞음 프레임을 보여야 합니다");
+
+            player.Advance(GameConfig.HitFlashSec / 2f);
+            Assert.AreEqual(PlayerController.Reaction.Hit, player.CurrentReaction, "아직 반응 시간 안입니다");
+
+            player.Advance(GameConfig.HitFlashSec);
+            Assert.AreEqual(PlayerController.Reaction.None, player.CurrentReaction);
+            Assert.AreEqual(idle, body.sprite, "대기 프레임으로 돌아가야 합니다");
+            Assert.AreEqual(GameConfig.FloorY, player.transform.position.y, Tolerance);
+        }
+
+        [Test]
+        public void PlayStumble_ShowsStumbleReactionOnFloor_AndReturnsToRunAfterStumbleSec()
+        {
+            PlayerController player = PlayerController.Create(root.transform);
+            SpriteRenderer body = player.GetComponent<SpriteRenderer>();
+            player.SetRunning(true);
+            Sprite runFrame = body.sprite;
+
+            player.PlayStumble();
+            Assert.AreEqual(PlayerController.Reaction.Stumble, player.CurrentReaction);
+            Assert.IsNull(player.CurrentAction);
+            Assert.AreEqual(GameConfig.FloorY, player.transform.position.y, Tolerance);
+            Sprite stumbleFrame = body.sprite;
+            Assert.AreNotEqual(runFrame, stumbleFrame, "휘청 프레임을 보여야 합니다");
+
+            player.Advance(GameConfig.StumbleSec / 2f);
+            Assert.AreEqual(PlayerController.Reaction.Stumble, player.CurrentReaction);
+            Assert.AreEqual(stumbleFrame, body.sprite, "단일 프레임이 유지되어야 합니다");
+
+            player.Advance(GameConfig.StumbleSec);
+            Assert.AreEqual(PlayerController.Reaction.None, player.CurrentReaction);
+            Assert.AreEqual(runFrame, body.sprite, "달리는 중이었으므로 달리기 프레임으로 돌아가야 합니다");
+
+            player.PlayHit();
+            Assert.AreNotEqual(stumbleFrame, body.sprite, "맞음과 휘청은 다른 프레임입니다");
+        }
+
+        [Test]
+        public void PlayHit_DuringJump_CancelsJumpAndLandsOnFloor()
+        {
+            PlayerController player = PlayerController.Create(root.transform);
+            float duration = GameConfig.ActionMaxSec;
+            player.DoAction(ActionType.Jump, duration);
+            player.Advance(duration / 4f);
+            Assert.Greater(player.transform.position.y, GameConfig.FloorY);
+
+            player.PlayHit();
+            Assert.IsNull(player.CurrentAction);
+            Assert.AreEqual(PlayerController.Reaction.Hit, player.CurrentReaction);
+            Assert.AreEqual(GameConfig.FloorY, player.transform.position.y, Tolerance);
+
+            player.SetX(5f);
+            Assert.AreEqual(GameConfig.FloorY, player.transform.position.y, Tolerance, "취소된 점프의 높이가 남으면 안 됩니다");
+        }
+
+        [Test]
+        public void PlayStumble_DuringWave_HidesSoundWaveEffect()
+        {
+            PlayerController player = PlayerController.Create(root.transform);
+            SpriteRenderer wave = player.transform.Find("SoundWave").GetComponent<SpriteRenderer>();
+            player.DoAction(ActionType.Wave, GameConfig.ActionMaxSec);
+            Assert.IsTrue(wave.gameObject.activeSelf);
+
+            player.PlayStumble();
+            Assert.IsFalse(wave.gameObject.activeSelf, "반응 중에는 음파 이펙트가 숨겨져야 합니다");
+            Assert.IsNull(player.CurrentAction);
+        }
+
+        [Test]
+        public void DoAction_DuringReaction_CancelsReaction()
+        {
+            PlayerController player = PlayerController.Create(root.transform);
+            player.PlayHit();
+            player.DoAction(ActionType.Slide, GameConfig.HitFlashSec * 2f); // 취소된 반응 시간보다 길게
+            Assert.AreEqual(PlayerController.Reaction.None, player.CurrentReaction);
+            Assert.AreEqual(ActionType.Slide, player.CurrentAction);
+
+            // 취소된 반응의 남은 시간이 동작을 끊으면 안 된다.
+            player.Advance(GameConfig.HitFlashSec);
+            Assert.AreEqual(ActionType.Slide, player.CurrentAction);
+
+            player.PlayStumble();
+            player.DoAction(ActionType.Wave, GameConfig.ActionMaxSec);
+            Assert.AreEqual(PlayerController.Reaction.None, player.CurrentReaction);
+            Assert.AreEqual(ActionType.Wave, player.CurrentAction);
+        }
+
+        [Test]
+        public void ResetPose_ClearsReaction()
+        {
+            PlayerController player = PlayerController.Create(root.transform);
+            SpriteRenderer body = player.GetComponent<SpriteRenderer>();
+            Sprite idle = body.sprite;
+
+            player.PlayStumble();
+            player.ResetPose();
+            Assert.AreEqual(PlayerController.Reaction.None, player.CurrentReaction);
+            Assert.AreEqual(idle, body.sprite);
+            Assert.AreEqual(GameConfig.FloorY, player.transform.position.y, Tolerance);
+        }
     }
 }

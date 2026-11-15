@@ -234,5 +234,69 @@ namespace NoiseRun
         public const float JumpRiseExponent = 0.5f;
         /// <summary>음파 이펙트의 주인공 앞 오프셋(유닛, 12px).</summary>
         public const float WaveEffectOffsetUnits = 0.75f;
+
+        // ── 판정·점수 (T6, 6절·7.3) ──
+        /// <summary>Perfect 창 ±초. 사용자 결정(T6 직접 플레이 "판정이 너무 박함"): 0.035 → 0.060. 곡마다 RhythmJudge.PerfectWindowFor(실제 Good 창 이하)로 쓴다.</summary>
+        public const double PerfectWindowSec = 0.060;
+        /// <summary>Good 창 ±초(상한). 사용자 결정: 0.070 → 0.100. 이 밖은 헛박자.
+        /// 빠른 곡에서 이웃 칸 창이 겹치지 않도록 실제 창은 min(이 값, 반박자 × GoodWindowMaxHalfBeatRatio)이다(RhythmJudge.GoodWindowFor).</summary>
+        public const double GoodWindowSec = 0.100;
+        /// <summary>Good 창 반폭의 반박자 대비 상한. 0.4면 칸 사이의 20%(양쪽 창 합 80%)가 헛박자 구간으로 남는다. 150 BPM보다 빠른 곡부터 Good 창이 줄어든다.</summary>
+        public const double GoodWindowMaxHalfBeatRatio = 0.4;
+        public const int ScorePerfect = 300;
+        public const int ScoreGood = 100;
+        /// <summary>점수 = base × (1 + min(combo, 이 값) / 이 값). 이 콤보에서 배율 최대 2배.</summary>
+        public const int ComboBonusCap = 100;
+
+        // ── 판정 반응 (T6, 6.3) ──
+        /// <summary>Miss 때 주인공 맞음 프레임(PlayerHit)을 보여 주는 시간(초). 사용자 결정: 틀린 키도 동작 없이 맞음 프레임만.</summary>
+        public const float HitFlashSec = 0.25f;
+        /// <summary>헛박자 때 휘청 프레임(PlayerStumble)을 보여 주는 시간(초).</summary>
+        public const float StumbleSec = 0.2f;
+        /// <summary>방화문이 음파에 날아가는 연출 시간(초). 끝나면 숨긴다.</summary>
+        public const float DoorBlownSec = 0.4f;
+        /// <summary>날아가는 동안 오른쪽(진행 방향)으로 가는 거리(유닛).</summary>
+        public const float DoorBlownDistanceUnits = 3f;
+        /// <summary>날아가는 동안 위로 뜨는 높이(유닛).</summary>
+        public const float DoorBlownRiseUnits = 1f;
+        /// <summary>날아가는 동안 도는 각도(도, 음수 = 시계 방향).</summary>
+        public const float DoorBlownSpinDeg = -90f;
+
+        // ── HUD (T6, 480×270 기준·화면 중앙이 0·위쪽이 +) ──
+        /// <summary>판정 문구 표시 시간(초).</summary>
+        public const float JudgeTextSec = 0.5f;
+        /// <summary>판정 문구 위치: 주인공 머리 위의 월드 y(유닛). 주인공 16px(1유닛), 점프 정점 약 2.25유닛, 천장 3유닛.</summary>
+        public const float JudgeTextWorldY = 2.5f;
+        /// <summary>오른쪽 위 점수·콤보 줄의 윗변 y.</summary>
+        public const float UiScoreY = 130f;
+        public const float UiComboY = 112f;
+        public static readonly Color JudgePerfectColor = new Color(0.3f, 0.9f, 0.4f, 1f);
+        public static readonly Color JudgeGoodColor = new Color(1f, 0.85f, 0.2f, 1f);
+        public static readonly Color JudgeMissColor = new Color(1f, 0.35f, 0.35f, 1f);
+        public static readonly Color JudgeOffBeatColor = new Color(0.7f, 0.7f, 0.7f, 1f);
+
+        // ── 타이밍바 (T6 사용자 결정: 명세 9.3 비트 눈금 대신) ──
+        /// <summary>선 두 개가 양 끝에서 가운데까지 오는 시간(초). 가운데 = 다음 장애물 시각. 바 반폭이 이 시간에 해당하는 고정 비율.
+        /// 사용자 결정(T6 스크린샷 뒤): 1.0 → 0.5. 선이 2배 빨라지고 초록·노랑 영역 폭이 2배(Perfect 약 8px, Good 약 17px)가 된다. 판정 창(ms)은 그대로.</summary>
+        public const double TimingBarLeadSec = 0.5;
+        /// <summary>HUD·타이밍바의 스크립트 실행 순서. 기본(0)인 GameFlow(판정)·CameraDirector(LateUpdate 카메라 이동) 뒤에 돌아 같은 프레임의 판정·카메라 위치를 반영한다(T6 리뷰 L1·L2).</summary>
+        public const int ViewAfterGameplayExecutionOrder = 100;
+        /// <summary>바 크기와 가운데 y(px).</summary>
+        public const float TimingBarWidth = 240f;
+        public const float TimingBarHeight = 8f;
+        public const float TimingBarY = -120f;
+        /// <summary>움직이는 타이밍 선 크기(px). 바보다 위아래로 조금 길다.</summary>
+        public const float TimingBarLineWidth = 2f;
+        public const float TimingBarLineHeight = 14f;
+        /// <summary>가운데 붐박스 아이콘(BeatIcon 16×16)의 가운데 y(px). 바 바로 위.</summary>
+        public const float BeatIconY = -104f;
+        /// <summary>정박 때 아이콘 확대 배율과 지속 시간(초).</summary>
+        public const float BeatIconPulseScale = 1.3f;
+        public const float BeatIconPulseSec = 0.12f;
+        /// <summary>바 영역 색: Good 창 밖(회색), Good 창(노랑), Perfect 창(초록). 판정 문구 색과 같다.</summary>
+        public static readonly Color TimingBarMissColor = new Color(0.35f, 0.35f, 0.35f, 1f);
+        public static readonly Color TimingBarGoodColor = JudgeGoodColor;
+        public static readonly Color TimingBarPerfectColor = JudgePerfectColor;
+        public static readonly Color TimingBarLineColor = Color.white;
     }
 }

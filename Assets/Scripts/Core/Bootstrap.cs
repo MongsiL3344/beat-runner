@@ -4,7 +4,7 @@ using UnityEngine.UI;
 namespace NoiseRun
 {
     /// <summary>
-    /// 자동 시작, 카메라·Canvas·Conductor·레벨·주인공·카메라 연출·GameFlow 생성. 만든 오브젝트는 모두 이 GameObject 아래에 두어
+    /// 자동 시작, 카메라·Canvas·Conductor·레벨·주인공·카메라 연출·HUD·타이밍 바·GameFlow 생성. 만든 오브젝트는 모두 이 GameObject 아래에 두어
     /// Restart 때 한꺼번에 제거된다(씬의 Main Camera는 건드리지 않는다).
     /// </summary>
     public sealed class Bootstrap : MonoBehaviour
@@ -17,6 +17,8 @@ namespace NoiseRun
         public LevelBuilder Level { get; private set; }
         public PlayerController Player { get; private set; }
         public CameraDirector CameraDirector { get; private set; }
+        public Hud Hud { get; private set; }
+        public BeatBarUI BeatBar { get; private set; }
 
         MenuScreens menus;
         AnalysisDebugView debugView;
@@ -115,8 +117,12 @@ namespace NoiseRun
 
             menus = new MenuScreens(Canvas.transform);
             debugView = AnalysisDebugView.Create(Canvas.transform);
+            // HUD와 타이밍 바는 숨긴 채 만들고 Playing에 들어갈 때 GameFlow가 보인다. 판정 문구는 주인공 머리 위를 따라간다.
+            Hud = Hud.Create(Canvas.transform);
+            Hud.Follow(Player.transform, cam);
+            BeatBar = BeatBarUI.Create(Canvas.transform);
             Flow = gameObject.AddComponent<GameFlow>();
-            Flow.Init(Conductor, menus, debugView, Level, Player, CameraDirector);
+            Flow.Init(Conductor, menus, debugView, Level, Player, CameraDirector, Hud, BeatBar);
         }
 
         void OnDestroy()

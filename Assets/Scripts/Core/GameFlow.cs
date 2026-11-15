@@ -11,7 +11,7 @@ namespace NoiseRun
     /// <summary>
     /// 상태 머신과 입력 분배. 입력은 Update에서 Keyboard.current로만 읽고,
     /// 한 프레임의 입력은 그 프레임 시작 시점의 상태 하나에서만 처리한다. 화면 그리기는 MenuScreens·AnalysisDebugView가 맡는다.
-    /// T5 범위: Title, SelectFile(+Songs 목록, ←/→ 난이도), Analyzing(로딩 → 분석), Playing(분석 직후 곧바로 진입하는 임시 흐름: 레벨·주인공 달리기·카메라 추적).
+    /// T5~T6 범위: Title, SelectFile(+Songs 목록, ←/→ 난이도), Analyzing(로딩 → 분석), Playing(분석 직후 곧바로 진입하는 임시 흐름: 레벨·주인공 달리기·카메라 추적·박자 판정·HUD·타이밍 바).
     /// startAt=debug이면 분석 뒤 Playing 대신 Preview(분석 디버그 화면을 띄우고 곡을 처음부터 재생)로 간다.
     /// </summary>
     public sealed class GameFlow : MonoBehaviour
@@ -50,12 +50,17 @@ namespace NoiseRun
         /// <summary>현재 Playing에 들어온 뒤 autoPlay가 실행한 동작 수. EnterPlaying에서 0으로 돌린다.</summary>
         public int AutoActionsFired { get; private set; }
 
+        /// <summary>박자 판정기(6.2). GameFlow가 만들어 Init에서 한 번 구독하며, Playing에 들어갈 때마다 Reset한다.</summary>
+        public RhythmJudge Judge { get; } = new RhythmJudge();
+
         Conductor conductor;
         MenuScreens menus;
         AnalysisDebugView debugView;
         LevelBuilder level;
         PlayerController player;
         CameraDirector cameraDirector;
+        Hud hud;
+        BeatBarUI beatBar;
 
         Difficulty currentDifficulty = GameConfig.DefaultDifficulty;
         int nextAutoNote;      // 다음에 지나갈 노트(Map.notes 인덱스)
@@ -76,7 +81,8 @@ namespace NoiseRun
         AnalysisOutput output;
 
         internal void Init(Conductor conductorToUse, MenuScreens menuScreens, AnalysisDebugView debugViewToUse,
-            LevelBuilder levelToUse, PlayerController playerToUse, CameraDirector cameraDirectorToUse)
+            LevelBuilder levelToUse, PlayerController playerToUse, CameraDirector cameraDirectorToUse,
+            Hud hudToUse, BeatBarUI beatBarToUse)
         {
             conductor = conductorToUse;
             menus = menuScreens;
@@ -84,6 +90,9 @@ namespace NoiseRun
             level = levelToUse;
             player = playerToUse;
             cameraDirector = cameraDirectorToUse;
+            hud = hudToUse;
+            beatBar = beatBarToUse;
+            Judge.Judged += OnJudged;
             menus.Difficulty = currentDifficulty;
             Render();
         }
@@ -169,8 +178,25 @@ namespace NoiseRun
                     break;
                 case GameState.Playing:
                     if (kb.escapeKey.wasPressedThisFrame) ExitPlaying();
+                    else HandlePlayingKeys(kb);
                     break;
             }
+        }
+
+        /// <summary>Space→Jump, ↓→Slide, →→Wave. 곡 시작 전(songTime &lt; 0)과 곡이 끝난 뒤의 입력은 무시한다.</summary>
+        void HandlePlayingKeys(Keyboard kb)
+        {
+            if (Map == null) return;
+            if (kb.spaceKey.wasPressedThisFrame) Press(ActionType.Jump);
+            if (kb.downArrowKey.wasPressedThisFrame) Press(ActionType.Slide);
+            if (kb.rightArrowKey.wasPressedThisFrame) Press(ActionType.Wave);
+        }
+
+        void Press(ActionType action)
+        {
+            double t = conductor.SongTime;
+            if (t < 0 || t > Map.songLength) return;
+            Judge.OnInput(action, t);
         }
 
         void UpdateSelectMain(Keyboard kb, bool enter)
@@ -288,6 +314,11 @@ namespace NoiseRun
             level.Build(Map);
             nextAutoNote = 0;
             AutoActionsFired = 0;
+            Judge.Reset(Map);
+            hud.Clear();
+            hud.SetVisible(true);
+            beatBar.Bind(Map, conductor);
+            beatBar.SetVisible(true);
 
             conductor.ScheduleStart(GameConfig.CountdownStepSec * GameConfig.CountdownSteps);
 
@@ -302,9 +333,37 @@ namespace NoiseRun
         }
 
         /// <summary>
-        /// Playing 한 프레임: 주인공 x를 곡 시간에 맞추고(비상구에서 멈춤), autoPlay면 지나간 노트마다 정답 동작을 한 번씩 실행한다.
+        /// 판정 결과를 주인공 반응·문 날리기·HUD로 나눠 보낸다(6.3). 판정기가 점수·콤보를 먼저 갱신하므로 여기서 읽으면 새 값이다.
+        /// Perfect/Good/EmptyBeat는 누른 동작 애니메이션, 오답·놓침(Miss)은 피격, OffBeat는 휘청거림이다.
+        /// </summary>
+        void OnJudged(JudgeEvent e)
+        {
+            switch (e.judgement)
+            {
+                case Judgement.Perfect:
+                case Judgement.Good:
+                case Judgement.EmptyBeat:
+                    player.DoAction(e.action, PlayerController.ActionDuration(Map.HalfBeatSec));
+                    break;
+                case Judgement.Miss:
+                    player.PlayHit();
+                    break;
+                case Judgement.OffBeat:
+                    player.PlayStumble();
+                    break;
+            }
+
+            level.OnJudged(e);
+            hud.SetScore(Judge.Score);
+            hud.SetCombo(Judge.Combo);
+            hud.ShowJudgement(e.judgement);
+        }
+
+        /// <summary>
+        /// Playing 한 프레임: 주인공 x를 곡 시간에 맞추고(비상구에서 멈춤), 지나간 노트마다 커서를 전진시키며 autoPlay면 아직 판정되지 않은 노트에
+        /// 정답 동작을 판정기로 넣는다. 마지막에 Judge.Tick으로 놓친 노트를 Miss 처리한다.
         /// Update가 Conductor.SongTime과 Time.deltaTime으로 부르며, 테스트는 시계를 올리고 직접 부른다.
-        /// 판정·추격자·종료 조건은 T6~T8에서 여기에 붙는다.
+        /// 추격자·종료 조건은 T7~T8에서 여기에 붙는다.
         /// </summary>
         public void Step(double songTime, float dt)
         {
@@ -323,27 +382,23 @@ namespace NoiseRun
 
             // 커서는 autoPlay와 상관없이 전진시킨다. 중간에 autoPlay를 켜도 지나간 노트를 한꺼번에 실행하지 않는다.
             // (프레임이 건너뛰어 노트 여러 개를 한 번에 지나면 모두 차례로 실행한다.)
+            // 수동 입력이 이미 판정한 노트는 autoPlay가 다시 넣지 않는다.
             var notes = Map.notes;
             while (nextAutoNote < notes.Count && notes[nextAutoNote].time <= songTime)
             {
-                if (AutoPlay)
+                Note note = notes[nextAutoNote];
+                if (AutoPlay && !note.judged)
                 {
-                    player.DoAction(CorrectAction(notes[nextAutoNote].kind), PlayerController.ActionDuration(Map.HalfBeatSec));
+                    Judge.OnInput(RhythmJudge.RequiredAction(note.kind), note.time);
                     AutoActionsFired++;
                 }
                 nextAutoNote++;
             }
+
+            Judge.Tick(songTime);
         }
 
-        /// <summary>장애물 종류별 정답 동작(Box→Jump, Laundry→Slide, Door→Wave). 조합(E1)은 아직 없어 첫 플래그만 본다.</summary>
-        static ActionType CorrectAction(ObstacleKind kind)
-        {
-            if ((kind & ObstacleKind.Box) != 0) return ActionType.Jump;
-            if ((kind & ObstacleKind.Laundry) != 0) return ActionType.Slide;
-            return ActionType.Wave;
-        }
-
-        /// <summary>레벨 오브젝트와 주인공·카메라 추적을 정리한다. 여러 번 불러도 된다.</summary>
+        /// <summary>레벨 오브젝트와 주인공·카메라 추적·HUD·타이밍 바를 정리한다. 여러 번 불러도 된다.</summary>
         void ClearLevel()
         {
             if (cameraDirector != null) cameraDirector.Follow(null);
@@ -353,6 +408,17 @@ namespace NoiseRun
                 player.gameObject.SetActive(false);
             }
             if (level != null) level.Clear();
+            if (hud != null)
+            {
+                hud.Clear();
+                hud.SetVisible(false);
+            }
+            if (beatBar != null)
+            {
+                beatBar.Bind(null, null);
+                beatBar.SetVisible(false);
+            }
+            Judge.Reset(null);
             nextAutoNote = 0;
             playerRunning = false;
         }

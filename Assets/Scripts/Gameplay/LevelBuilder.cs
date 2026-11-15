@@ -8,16 +8,27 @@ namespace NoiseRun
     /// 복도는 CeilingHeight(48px) 띠 하나이고, 화면 위아래는 같은 층 구조를 어둡게(`n` 색 곱) 반복해 아파트 단면처럼 보이게 한다.
     /// 타일 줄마다 SpriteRenderer 하나를 Tiled 모드로 곡 전체 길이만큼 늘린다. 격자당 Sprite는 1개만 만들어 공유하고(메모 M1),
     /// Clear에서 그 texture·sprite를 Destroy한다.
+    /// 판정(T6): 방화문을 음파(Wave)로 Perfect·Good 처리하면 OnJudged가 그 문을 FireDoorBlown 스프라이트로 바꿔 날려 보낸다.
     /// </summary>
     public sealed class LevelBuilder : MonoBehaviour
     {
         static readonly Vector2 FootPivot = new Vector2(0.5f, 0f);
         static readonly Vector2 HangPivot = new Vector2(0.5f, 1f);
 
+        /// <summary>날아가는 방화문 하나의 상태. 시작 위치는 날리기 시작할 때의 값이고, 회전은 항상 0도에서 출발한다.</summary>
+        sealed class FlyingDoor
+        {
+            public Transform transform;
+            public Vector3 startLocalPosition;
+            public float elapsed;
+        }
+
         readonly List<Sprite> made = new List<Sprite>();
         readonly Dictionary<int, Transform> obstacles = new Dictionary<int, Transform>();
+        readonly List<FlyingDoor> flyingDoors = new List<FlyingDoor>();
         GameObject levelRoot;
         BeatMap map;
+        Sprite blownDoorSprite;
 
         /// <summary>parent 아래에 새 GameObject를 만든다. 빈 상태이며 Build를 불러야 레벨이 생긴다.</summary>
         public static LevelBuilder Create(Transform parent)
@@ -41,6 +52,64 @@ namespace NoiseRun
             return obstacles.TryGetValue(noteIndex, out Transform t) ? t : null;
         }
 
+        void Update()
+        {
+            Advance(Time.deltaTime);
+        }
+
+        /// <summary>
+        /// 판정 결과를 장애물에 반영한다(6.3). 방화문(상자·빨래와 겹치지 않은 문)에 대한 Perfect·Good만 문을 날려 보내고,
+        /// 나머지(상자·빨래·모든 Miss·헛박자·빈 박자)는 아무것도 바꾸지 않는다. 범위 밖 인덱스·noteIndex -1은 무시한다.
+        /// </summary>
+        public void OnJudged(JudgeEvent e)
+        {
+            if (e.judgement != Judgement.Perfect && e.judgement != Judgement.Good) return;
+            if (map == null || map.notes == null || e.noteIndex < 0 || e.noteIndex >= map.notes.Count) return;
+
+            // BuildObstacles가 문을 놓는 조건과 같다: 상자·빨래 플래그가 없고 문 플래그가 있어야 한다.
+            ObstacleKind kind = map.notes[e.noteIndex].kind;
+            if ((kind & (ObstacleKind.Box | ObstacleKind.Laundry)) != 0 || (kind & ObstacleKind.Door) == 0) return;
+
+            Transform door = ObstacleFor(e.noteIndex);
+            if (door == null) return;
+            foreach (FlyingDoor flying in flyingDoors)
+                if (flying.transform == door) return; // 이미 날아가는 중
+
+            door.GetComponent<SpriteRenderer>().sprite = blownDoorSprite;
+            flyingDoors.Add(new FlyingDoor { transform = door, startLocalPosition = door.localPosition });
+        }
+
+        /// <summary>
+        /// 날아가는 문을 dt초 진행한다. Update가 Time.deltaTime으로 부르며, 테스트는 직접 부를 수 있다.
+        /// DoorBlownSec 동안 오른쪽 DoorBlownDistanceUnits, 위쪽 DoorBlownRiseUnits 이동하고 DoorBlownSpinDeg만큼 회전한다
+        /// (easeOut: 처음에 빠르게 튕겨 나가 점점 느려진다). 끝나면 오브젝트를 비활성화한다.
+        /// </summary>
+        public void Advance(float dt)
+        {
+            for (int i = flyingDoors.Count - 1; i >= 0; i--)
+            {
+                FlyingDoor flying = flyingDoors[i];
+                if (flying.transform == null) // 레벨이 파괴됨
+                {
+                    flyingDoors.RemoveAt(i);
+                    continue;
+                }
+
+                flying.elapsed += dt;
+                float u = Mathf.Clamp01(flying.elapsed / GameConfig.DoorBlownSec);
+                float eased = 1f - (1f - u) * (1f - u);
+                flying.transform.localPosition = flying.startLocalPosition
+                    + new Vector3(GameConfig.DoorBlownDistanceUnits * eased, GameConfig.DoorBlownRiseUnits * eased, 0f);
+                flying.transform.localRotation = Quaternion.Euler(0f, 0f, GameConfig.DoorBlownSpinDeg * eased);
+
+                if (u >= 1f)
+                {
+                    flying.transform.gameObject.SetActive(false);
+                    flyingDoors.RemoveAt(i);
+                }
+            }
+        }
+
         /// <summary>이전 레벨을 지우고 복도 타일(곡 전체 + 앞뒤 여백), 장애물, 비상구를 만든다. map이 null이면 지우기만 한다.</summary>
         public void Build(BeatMap map)
         {
@@ -56,7 +125,7 @@ namespace NoiseRun
             BuildExit();
         }
 
-        /// <summary>만든 오브젝트와 texture·sprite를 모두 제거한다. 오브젝트는 즉시 비활성화되고 프레임 끝에 파괴된다.</summary>
+        /// <summary>만든 오브젝트와 texture·sprite를 모두 제거한다. 오브젝트는 즉시 비활성화되고 프레임 끝에 파괴된다. 날아가던 문도 놓아 준다.</summary>
         public void Clear()
         {
             if (levelRoot != null)
@@ -65,6 +134,7 @@ namespace NoiseRun
                 Destroy(levelRoot);
             }
             levelRoot = null;
+            flyingDoors.Clear();
             obstacles.Clear();
             Exit = null;
             map = null;
@@ -73,6 +143,7 @@ namespace NoiseRun
 
         void OnDestroy()
         {
+            flyingDoors.Clear();
             // 자식 오브젝트는 이 오브젝트와 함께 파괴되므로 에셋만 정리한다.
             obstacles.Clear();
             ReleaseSprites();
@@ -86,6 +157,7 @@ namespace NoiseRun
                 Destroy(sprite.texture);
                 Destroy(sprite);
             }
+            blownDoorSprite = null;
             made.Clear();
         }
 
@@ -197,6 +269,7 @@ namespace NoiseRun
 
             Sprite box = Make(SpriteData.Box, FootPivot);
             Sprite laundry = Make(SpriteData.Laundry, HangPivot);
+            blownDoorSprite = Make(SpriteData.FireDoorBlown, FootPivot); // 방화문과 같은 피벗: 날아가기 전에 제자리에서 모양만 바뀐다
             Sprite door = Make(SpriteData.FireDoor, FootPivot);
             Transform parent = new GameObject("Obstacles").transform;
             parent.SetParent(levelRoot.transform, false);

@@ -102,9 +102,10 @@ namespace NoiseRun.Tests
         }
 
         [UnityTest]
-        public IEnumerator StartFromClip_ClickTrack_ReachesPreviewWithMap()
+        public IEnumerator StartFromClip_ClickTrack_DebugPreview_ReachesPreviewWithMap()
         {
             var flow = Bootstrap.Instance.Flow;
+            flow.DebugPreview = true; // startAt=debug path: Preview instead of Playing
             float[] samples = TestAudio.ClickTrack(AnalysisSampleRate, ClipSeconds, ClickBpm, ClickFirstBeatSec, Band.Low, null);
             AudioClip clip = TestAudio.ToClip(samples, AnalysisSampleRate);
 
@@ -116,6 +117,25 @@ namespace NoiseRun.Tests
             Assert.AreEqual(GameState.Preview, flow.State, "LastError: " + flow.LastError);
             Assert.IsNotNull(flow.Map);
             Assert.AreEqual(ClickBpm, flow.Map.bpm, BpmTolerance);
+            Assert.IsNull(flow.LastError);
+        }
+
+        [UnityTest]
+        public IEnumerator StartFromClip_ClickTrack_ReachesPlayingWithMap()
+        {
+            var flow = Bootstrap.Instance.Flow;
+            float[] samples = TestAudio.ClickTrack(AnalysisSampleRate, ClipSeconds, ClickBpm, ClickFirstBeatSec, Band.Low, null);
+            AudioClip clip = TestAudio.ToClip(samples, AnalysisSampleRate);
+            var changes = new List<GameState>();
+            flow.StateChanged += (prev, next) => changes.Add(next);
+
+            flow.StartFromClip(clip, "click");
+            yield return WaitWhileAnalyzing(flow);
+
+            Assert.AreEqual(GameState.Playing, flow.State, "LastError: " + flow.LastError);
+            Assert.IsFalse(changes.Contains(GameState.Preview), "T5 goes straight to Playing");
+            Assert.AreEqual(ClickBpm, flow.Map.bpm, BpmTolerance);
+            Assert.AreEqual(GameConfig.DefaultDifficulty, flow.Map.difficulty);
             Assert.IsNull(flow.LastError);
         }
 
@@ -138,6 +158,7 @@ namespace NoiseRun.Tests
         public IEnumerator Preview_Esc_ReturnsToSelectFileAndReleasesSong()
         {
             var flow = Bootstrap.Instance.Flow;
+            flow.DebugPreview = true; // startAt=debug path: Preview instead of Playing
             var keyboard = InputSystem.AddDevice<Keyboard>();
             float[] samples = TestAudio.ClickTrack(AnalysisSampleRate, ClipSeconds, ClickBpm, ClickFirstBeatSec, Band.Low, null);
             AudioClip clip = TestAudio.ToClip(samples, AnalysisSampleRate);
@@ -180,7 +201,7 @@ namespace NoiseRun.Tests
 
             // An identical analysis started later finishes after the abandoned one; then run extra frames.
             Task<AnalysisOutput> reference = BeatMapGenerator.AnalyzeDetailedAsync(
-                samples, 1, AnalysisSampleRate, ClipSeconds, new AnalysisProgress());
+                samples, 1, AnalysisSampleRate, ClipSeconds, new AnalysisProgress(), GameConfig.DefaultDifficulty);
             double deadline = Time.realtimeSinceStartupAsDouble + AnalysisTimeoutSec;
             while (!reference.IsCompleted && Time.realtimeSinceStartupAsDouble < deadline)
                 yield return null;
@@ -192,6 +213,7 @@ namespace NoiseRun.Tests
             Assert.IsNull(flow.Map);
             Assert.IsNull(flow.LastError);
             Assert.IsFalse(changes.Contains(GameState.Preview), "a cancelled analysis must never reach Preview");
+            Assert.IsFalse(changes.Contains(GameState.Playing), "a cancelled analysis must never reach Playing");
             Assert.IsTrue(clip == null, "the song clip must be destroyed when the analysis is cancelled");
         }
 
@@ -199,6 +221,7 @@ namespace NoiseRun.Tests
         public IEnumerator StartFromClip_WhileAnalyzing_OnlySecondResultIsUsed()
         {
             var flow = Bootstrap.Instance.Flow;
+            flow.DebugPreview = true; // startAt=debug path: Preview instead of Playing
             float[] first = TestAudio.ClickTrack(AnalysisSampleRate, ClipSeconds, ClickBpm, ClickFirstBeatSec, Band.Low, null);
             float[] second = TestAudio.ClickTrack(AnalysisSampleRate, ClipSeconds, SecondClickBpm, ClickFirstBeatSec, Band.Low, null);
             AudioClip firstClip = TestAudio.ToClip(first, AnalysisSampleRate);

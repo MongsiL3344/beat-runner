@@ -69,7 +69,7 @@ namespace NoiseRun.Tests
         static IEnumerator Analyze(float[] samples, Holder holder, int channels = Channels)
         {
             double songLength = (double)samples.Length / channels / SampleRate;
-            var task = BeatMapGenerator.AnalyzeDetailedAsync(samples, channels, SampleRate, songLength, new AnalysisProgress());
+            var task = BeatMapGenerator.AnalyzeDetailedAsync(samples, channels, SampleRate, songLength, new AnalysisProgress(), Difficulty.Hard);
             yield return WaitFor(task);
             Assert.IsFalse(task.IsFaulted, task.Exception != null ? task.Exception.ToString() : "");
             holder.Output = task.Result;
@@ -78,7 +78,7 @@ namespace NoiseRun.Tests
         static IEnumerator ExpectAnalysisFailure(float[] mono)
         {
             double songLength = (double)mono.Length / SampleRate;
-            var task = BeatMapGenerator.AnalyzeDetailedAsync(mono, Channels, SampleRate, songLength, new AnalysisProgress());
+            var task = BeatMapGenerator.AnalyzeDetailedAsync(mono, Channels, SampleRate, songLength, new AnalysisProgress(), Difficulty.Hard);
             yield return WaitFor(task);
             Assert.IsTrue(task.IsFaulted);
             var failed = task.Exception.InnerException as AnalysisFailedException;
@@ -412,7 +412,7 @@ namespace NoiseRun.Tests
             double songLength = (double)mono.Length / SampleRate;
 
             var progress = new AnalysisProgress();
-            Task<AnalysisOutput> task = BeatMapGenerator.AnalyzeDetailedAsync(mono, Channels, SampleRate, songLength, progress);
+            Task<AnalysisOutput> task = BeatMapGenerator.AnalyzeDetailedAsync(mono, Channels, SampleRate, songLength, progress, Difficulty.Hard);
 
             var samples = new List<float>();
             int framesDuringAnalysis = 0;
@@ -448,6 +448,81 @@ namespace NoiseRun.Tests
             Assert.AreEqual(LongTrackBpm, output.map.bpm, BpmTolerance);
             // low on the beat + high on the half beat: either click may be picked as "the beat", so compare on the half-beat circle
             Assert.LessOrEqual(CircularDiff(output.map.firstBeatTime, firstBeat, period * 0.5), PhaseToleranceSec);
+        }
+
+        // ---------------------------------------------------------------- difficulty (spec 5.7)
+
+        [TestCase(5, Difficulty.Normal, 4)]
+        [TestCase(15, Difficulty.Normal, 11)]
+        [TestCase(5, Difficulty.Easy, 2)]
+        [TestCase(1, Difficulty.Hard, 1)]
+        [TestCase(7, Difficulty.Hard, 7)]
+        [TestCase(123, Difficulty.Hard, 123)]
+        public void KeepCount_RoundsRatioTimesCountAwayFromZero(int candidateCount, Difficulty difficulty, int expected)
+        {
+            Assert.AreEqual(expected, BeatMapGenerator.KeepCount(candidateCount, difficulty));
+        }
+
+        [UnityTest]
+        public IEnumerator Difficulty_SelectsStrongestCandidatesAsNestedSubsets()
+        {
+            double period = 60.0 / 120f;
+            float[] mono = TestAudio.ClickTrack(SampleRate, TrackSeconds, 120f, period * FirstBeatFraction, Band.Low, Band.High);
+            var holder = new Holder();
+            yield return Analyze(mono, holder);
+            AnalysisOutput a = holder.Output;
+
+            List<BeatMapGenerator.NoteCandidate> candidates = BeatMapGenerator.Candidates(a.onsets, a.bpm, a.map.songLength);
+            Assert.Greater(candidates.Count, 0);
+            var scoreBySlot = new Dictionary<int, double>();
+            foreach (var c in candidates) scoreBySlot[c.slotIndex] = c.score;
+
+            BeatMap easy = BeatMapGenerator.Generate(a.onsets, a.bpm, a.map.songLength, Difficulty.Easy);
+            BeatMap normal = BeatMapGenerator.Generate(a.onsets, a.bpm, a.map.songLength, Difficulty.Normal);
+            BeatMap hard = BeatMapGenerator.Generate(a.onsets, a.bpm, a.map.songLength, Difficulty.Hard);
+
+            Assert.AreEqual(Difficulty.Easy, easy.difficulty);
+            Assert.AreEqual(Difficulty.Normal, normal.difficulty);
+            Assert.AreEqual(Difficulty.Hard, hard.difficulty);
+
+            Assert.AreEqual(BeatMapGenerator.KeepCount(candidates.Count, Difficulty.Easy), easy.notes.Count);
+            Assert.AreEqual(BeatMapGenerator.KeepCount(candidates.Count, Difficulty.Normal), normal.notes.Count);
+            Assert.AreEqual(candidates.Count, hard.notes.Count, "Hard keeps every candidate");
+            Assert.Less(easy.notes.Count, normal.notes.Count);
+            Assert.Less(normal.notes.Count, hard.notes.Count);
+
+            AssertKeptAreStrongest(easy, candidates, scoreBySlot);
+            AssertKeptAreStrongest(normal, candidates, scoreBySlot);
+            AssertSlotSubset(easy, normal);
+            AssertSlotSubset(normal, hard);
+
+            for (int i = 0; i < hard.notes.Count; i++)
+                Assert.AreEqual(candidates[i].slotIndex, hard.notes[i].slotIndex);
+        }
+
+        static void AssertSlotSubset(BeatMap smaller, BeatMap larger)
+        {
+            var slots = new HashSet<int>();
+            foreach (Note n in larger.notes) slots.Add(n.slotIndex);
+            foreach (Note n in smaller.notes)
+                Assert.IsTrue(slots.Contains(n.slotIndex), smaller.difficulty + " slot " + n.slotIndex + " missing from " + larger.difficulty);
+        }
+
+        static void AssertKeptAreStrongest(BeatMap map, List<BeatMapGenerator.NoteCandidate> candidates, Dictionary<int, double> scoreBySlot)
+        {
+            var kept = new HashSet<int>();
+            double minKept = double.MaxValue;
+            int prev = int.MinValue;
+            foreach (Note n in map.notes)
+            {
+                Assert.Greater(n.slotIndex, prev, "notes must be in ascending slot order");
+                prev = n.slotIndex;
+                kept.Add(n.slotIndex);
+                minKept = Math.Min(minKept, scoreBySlot[n.slotIndex]);
+            }
+            foreach (var c in candidates)
+                if (!kept.Contains(c.slotIndex))
+                    Assert.LessOrEqual(c.score, minKept, map.difficulty + ": dropped slot " + c.slotIndex + " outscores a kept note");
         }
     }
 }

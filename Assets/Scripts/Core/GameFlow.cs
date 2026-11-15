@@ -11,7 +11,8 @@ namespace NoiseRun
     /// <summary>
     /// 상태 머신과 입력 분배. 입력은 Update에서 Keyboard.current로만 읽고,
     /// 한 프레임의 입력은 그 프레임 시작 시점의 상태 하나에서만 처리한다. 화면 그리기는 MenuScreens·AnalysisDebugView가 맡는다.
-    /// T3 범위: Title, SelectFile(+Songs 목록), Analyzing(로딩 → 분석), Preview(임시: 분석 디버그 화면을 띄우고 곡을 처음부터 재생).
+    /// T5 범위: Title, SelectFile(+Songs 목록, ←/→ 난이도), Analyzing(로딩 → 분석), Playing(분석 직후 곧바로 진입하는 임시 흐름: 레벨·주인공 달리기·카메라 추적).
+    /// startAt=debug이면 분석 뒤 Playing 대신 Preview(분석 디버그 화면을 띄우고 곡을 처음부터 재생)로 간다.
     /// </summary>
     public sealed class GameFlow : MonoBehaviour
     {
@@ -26,9 +27,39 @@ namespace NoiseRun
         /// <summary>SelectFile 화면에 띄우는 직전 오류 문구. 없으면 null.</summary>
         public string LastError => lastError;
 
+        /// <summary>
+        /// 다음 분석에 쓸 난이도(5.7). 런타임에만 유지하고 저장하지 않는다. 설정하면 파일 선택·Songs 목록의 난이도 표시도 바뀐다.
+        /// SelectFile에서 ←/→로 한 단계씩 바뀐다.
+        /// </summary>
+        public Difficulty CurrentDifficulty
+        {
+            get => currentDifficulty;
+            set
+            {
+                currentDifficulty = value;
+                if (menus != null) menus.Difficulty = value;
+            }
+        }
+
+        /// <summary>true면 Playing에서 노트 시각마다 정답 동작을 자동 실행한다. Bootstrap이 DevOptions.AutoPlay로 정하고 테스트가 직접 바꾼다.</summary>
+        public bool AutoPlay { get; set; }
+
+        /// <summary>true면 분석 성공 뒤 Playing 대신 T3 분석 디버그 화면(Preview)으로 간다(startAt=debug). Bootstrap이 정한다.</summary>
+        public bool DebugPreview { get; set; }
+
+        /// <summary>현재 Playing에 들어온 뒤 autoPlay가 실행한 동작 수. EnterPlaying에서 0으로 돌린다.</summary>
+        public int AutoActionsFired { get; private set; }
+
         Conductor conductor;
         MenuScreens menus;
         AnalysisDebugView debugView;
+        LevelBuilder level;
+        PlayerController player;
+        CameraDirector cameraDirector;
+
+        Difficulty currentDifficulty = GameConfig.DefaultDifficulty;
+        int nextAutoNote;      // 다음에 지나갈 노트(Map.notes 인덱스)
+        bool playerRunning;
 
         SelectView selectView = SelectView.Main;
         string songsFolder = string.Empty;
@@ -44,11 +75,16 @@ namespace NoiseRun
         Task<AnalysisOutput> analysisTask;
         AnalysisOutput output;
 
-        internal void Init(Conductor conductorToUse, MenuScreens menuScreens, AnalysisDebugView debugViewToUse)
+        internal void Init(Conductor conductorToUse, MenuScreens menuScreens, AnalysisDebugView debugViewToUse,
+            LevelBuilder levelToUse, PlayerController playerToUse, CameraDirector cameraDirectorToUse)
         {
             conductor = conductorToUse;
             menus = menuScreens;
             debugView = debugViewToUse;
+            level = levelToUse;
+            player = playerToUse;
+            cameraDirector = cameraDirectorToUse;
+            menus.Difficulty = currentDifficulty;
             Render();
         }
 
@@ -57,7 +93,11 @@ namespace NoiseRun
             if (next == State) return;
             GameState prev = State;
             State = next;
-            if (next == GameState.SelectFile) selectView = SelectView.Main;
+            if (next == GameState.SelectFile)
+            {
+                selectView = SelectView.Main;
+                ClearLevel();
+            }
             Render();
             StateChanged?.Invoke(prev, next);
         }
@@ -102,6 +142,9 @@ namespace NoiseRun
 
             // 분석 결과는 입력과 상관없이 확인한다. 입력이 상태를 바꾼 프레임이면 건너뛴다.
             if (State == GameState.Analyzing && analysisTask != null) PollAnalysis();
+
+            // 입력이 Playing을 벗어나게 한 프레임에는 건너뛴다.
+            if (State == GameState.Playing) Step(conductor.SongTime, Time.deltaTime);
         }
 
         void HandleInput(Keyboard kb)
@@ -124,6 +167,9 @@ namespace NoiseRun
                 case GameState.Preview:
                     if (kb.escapeKey.wasPressedThisFrame) ExitPreview();
                     break;
+                case GameState.Playing:
+                    if (kb.escapeKey.wasPressedThisFrame) ExitPlaying();
+                    break;
             }
         }
 
@@ -131,6 +177,15 @@ namespace NoiseRun
         {
             if (enter) OpenFileDialog();
             else if (kb.fKey.wasPressedThisFrame) OpenSongList();
+            else StepDifficulty(kb);
+        }
+
+        /// <summary>←/→로 난이도를 한 단계 낮추거나 높인다. 쉬움·어려움에서 멈춘다(순환 없음).</summary>
+        void StepDifficulty(Keyboard kb)
+        {
+            int delta = kb.leftArrowKey.wasPressedThisFrame ? -1 : kb.rightArrowKey.wasPressedThisFrame ? 1 : 0;
+            if (delta == 0) return;
+            CurrentDifficulty = (Difficulty)Mathf.Clamp((int)CurrentDifficulty + delta, (int)Difficulty.Easy, (int)Difficulty.Hard);
         }
 
         void UpdateSongList(Keyboard kb, bool enter)
@@ -151,6 +206,10 @@ namespace NoiseRun
             else if (enter)
             {
                 if (songs.Length > 0) StartFromFile(songs[songIndex]);
+            }
+            else
+            {
+                StepDifficulty(kb);
             }
         }
 
@@ -209,10 +268,100 @@ namespace NoiseRun
             ChangeState(GameState.SelectFile);
         }
 
+        /// <summary>
+        /// Playing 종료(T5 임시: 일시정지 없이 Esc로 바로 나간다. T8에서 Paused가 생긴다).
+        /// 음악 정지, 레벨 정리, 클립 해제, 파일 선택으로.
+        /// </summary>
+        void ExitPlaying()
+        {
+            ReleaseClip(); // conductor.Stop + ClearLevel 포함
+            lastError = null;
+            ChangeState(GameState.SelectFile);
+        }
+
+        /// <summary>
+        /// 분석 성공 뒤 곧바로 Playing(T5 임시. T8에서 Preview·Countdown이 끼어든다).
+        /// 곡 시작 전 CountdownStepSec × CountdownSteps 동안은 곡 시간이 음수이고, 그동안 주인공은 x &lt; 0에서 달린다. 카운트다운 문구는 없다.
+        /// </summary>
+        void EnterPlaying()
+        {
+            level.Build(Map);
+            nextAutoNote = 0;
+            AutoActionsFired = 0;
+
+            conductor.ScheduleStart(GameConfig.CountdownStepSec * GameConfig.CountdownSteps);
+
+            player.gameObject.SetActive(true);
+            player.Face(true);
+            player.SetX(Mathf.Min(level.TimeToX(conductor.SongTime), level.ExitX));
+            player.SetRunning(true);
+            playerRunning = true;
+            cameraDirector.Follow(player.transform);
+
+            ChangeState(GameState.Playing);
+        }
+
+        /// <summary>
+        /// Playing 한 프레임: 주인공 x를 곡 시간에 맞추고(비상구에서 멈춤), autoPlay면 지나간 노트마다 정답 동작을 한 번씩 실행한다.
+        /// Update가 Conductor.SongTime과 Time.deltaTime으로 부르며, 테스트는 시계를 올리고 직접 부른다.
+        /// 판정·추격자·종료 조건은 T6~T8에서 여기에 붙는다.
+        /// </summary>
+        public void Step(double songTime, float dt)
+        {
+            if (State != GameState.Playing || Map == null) return;
+
+            float exitX = level.ExitX;
+            float x = Mathf.Min(level.TimeToX(songTime), exitX);
+            player.SetX(x);
+
+            bool running = x < exitX;
+            if (running != playerRunning)
+            {
+                playerRunning = running;
+                player.SetRunning(running);
+            }
+
+            // 커서는 autoPlay와 상관없이 전진시킨다. 중간에 autoPlay를 켜도 지나간 노트를 한꺼번에 실행하지 않는다.
+            // (프레임이 건너뛰어 노트 여러 개를 한 번에 지나면 모두 차례로 실행한다.)
+            var notes = Map.notes;
+            while (nextAutoNote < notes.Count && notes[nextAutoNote].time <= songTime)
+            {
+                if (AutoPlay)
+                {
+                    player.DoAction(CorrectAction(notes[nextAutoNote].kind), PlayerController.ActionDuration(Map.HalfBeatSec));
+                    AutoActionsFired++;
+                }
+                nextAutoNote++;
+            }
+        }
+
+        /// <summary>장애물 종류별 정답 동작(Box→Jump, Laundry→Slide, Door→Wave). 조합(E1)은 아직 없어 첫 플래그만 본다.</summary>
+        static ActionType CorrectAction(ObstacleKind kind)
+        {
+            if ((kind & ObstacleKind.Box) != 0) return ActionType.Jump;
+            if ((kind & ObstacleKind.Laundry) != 0) return ActionType.Slide;
+            return ActionType.Wave;
+        }
+
+        /// <summary>레벨 오브젝트와 주인공·카메라 추적을 정리한다. 여러 번 불러도 된다.</summary>
+        void ClearLevel()
+        {
+            if (cameraDirector != null) cameraDirector.Follow(null);
+            if (player != null)
+            {
+                player.ResetPose();
+                player.gameObject.SetActive(false);
+            }
+            if (level != null) level.Clear();
+            nextAutoNote = 0;
+            playerRunning = false;
+        }
+
         void OnDestroy()
         {
             CancelWork();
-            // conductor·화면은 함께 파괴되므로 건드리지 않고 클립만 해제한다.
+            // conductor·화면은 함께 파괴되므로 건드리지 않고 클립만 해제한다. 레벨은 만든 텍스처가 있어 비운다.
+            if (level != null) level.Clear();
             if (currentClip != null)
             {
                 Destroy(currentClip);
@@ -250,6 +399,7 @@ namespace NoiseRun
 
         void ReleaseClip()
         {
+            ClearLevel();
             if (conductor != null)
             {
                 conductor.Stop();
@@ -275,7 +425,7 @@ namespace NoiseRun
             }
 
             currentClip = clip;
-            conductor.Load(clip); // 재생은 Preview 진입 뒤에 한다
+            conductor.Load(clip); // 재생은 분석이 끝난 뒤(Playing 또는 Preview 진입 때) 시작한다
             BeginAnalysis();
         }
 
@@ -293,7 +443,7 @@ namespace NoiseRun
             {
                 float[] interleaved = AudioLoader.ReadInterleaved(currentClip);
                 analysisTask = BeatMapGenerator.AnalyzeDetailedAsync(
-                    interleaved, currentClip.channels, currentClip.frequency, currentClip.length, progress);
+                    interleaved, currentClip.channels, currentClip.frequency, currentClip.length, progress, CurrentDifficulty);
             }
             catch (Exception e)
             {
@@ -327,9 +477,16 @@ namespace NoiseRun
             {
                 output = task.Result;
                 Map = output.map;
-                // 시계를 먼저 시작한다. ChangeState → Render가 곡 시간(conductor.SongTime)을 바로 읽는다.
-                conductor.ScheduleStart(0); // T3 임시: 곡을 처음부터 재생(Preview 연출은 T8)
-                ChangeState(GameState.Preview);
+                if (DebugPreview)
+                {
+                    // 시계를 먼저 시작한다. ChangeState → Render가 곡 시간(conductor.SongTime)을 바로 읽는다.
+                    conductor.ScheduleStart(0); // startAt=debug: 곡을 처음부터 재생하며 분석 디버그 화면을 띄움
+                    ChangeState(GameState.Preview);
+                }
+                else
+                {
+                    EnterPlaying();
+                }
             }
         }
 

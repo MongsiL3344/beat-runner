@@ -20,21 +20,21 @@ namespace NoiseRun
         const string MapStage = "맵 생성";
 
         /// <summary>BeatMap만 필요한 호출자용(명세 4.2). 자세한 결과는 AnalyzeDetailedAsync.</summary>
-        public static Task<BeatMap> AnalyzeAsync(float[] interleaved, int channels, int sampleRate, double songLength, AnalysisProgress progress)
+        public static Task<BeatMap> AnalyzeAsync(float[] interleaved, int channels, int sampleRate, double songLength, AnalysisProgress progress, Difficulty difficulty)
         {
-            return Task.Run(() => Run(interleaved, channels, sampleRate, songLength, progress).map);
+            return Task.Run(() => Run(interleaved, channels, sampleRate, songLength, progress, difficulty).map);
         }
 
         /// <summary>
         /// 워커 스레드에서 분석한다. 성공하면 progress.value = 1.
-        /// interleaved는 분석이 끝날 때까지 바꾸지 말 것.
+        /// interleaved는 분석이 끝날 때까지 바꾸지 말 것. 난이도는 마지막 노트 선별(5.7)에만 쓴다.
         /// </summary>
-        public static Task<AnalysisOutput> AnalyzeDetailedAsync(float[] interleaved, int channels, int sampleRate, double songLength, AnalysisProgress progress)
+        public static Task<AnalysisOutput> AnalyzeDetailedAsync(float[] interleaved, int channels, int sampleRate, double songLength, AnalysisProgress progress, Difficulty difficulty)
         {
-            return Task.Run(() => Run(interleaved, channels, sampleRate, songLength, progress));
+            return Task.Run(() => Run(interleaved, channels, sampleRate, songLength, progress, difficulty));
         }
 
-        static AnalysisOutput Run(float[] interleaved, int channels, int sampleRate, double songLength, AnalysisProgress progress)
+        static AnalysisOutput Run(float[] interleaved, int channels, int sampleRate, double songLength, AnalysisProgress progress, Difficulty difficulty)
         {
             if (interleaved == null) throw new ArgumentNullException(nameof(interleaved));
             if (progress == null) progress = new AnalysisProgress();
@@ -58,21 +58,74 @@ namespace NoiseRun
 
             progress.stage = MapStage;
             progress.value = GameConfig.AnalysisProgressBpmEnd;
-            BeatMap map = Generate(onsets, bpm, songLength);
+            BeatMap map = Generate(onsets, bpm, songLength, difficulty);
 
             progress.value = 1f;
             watch.Stop();
             return new AnalysisOutput { map = map, onsets = onsets, bpm = bpm, elapsedSec = watch.Elapsed.TotalSeconds };
         }
 
+        /// <summary>노트 후보 하나(5.6 루프 결과: 칸마다 점수가 가장 높은 온셋).</summary>
+        public struct NoteCandidate
+        {
+            public int slotIndex;
+            public double score;
+            public ObstacleKind kind;
+        }
+
+        /// <summary>난이도별 노트 비율(5.7, GameConfig).</summary>
+        public static double NoteRatio(Difficulty difficulty)
+        {
+            switch (difficulty)
+            {
+                case Difficulty.Easy: return GameConfig.DifficultyNoteRatioEasy;
+                case Difficulty.Normal: return GameConfig.DifficultyNoteRatioNormal;
+                default: return GameConfig.DifficultyNoteRatioHard;
+            }
+        }
+
+        /// <summary>남길 노트 수 = round(비율 × 후보 수). .5는 0에서 먼 쪽으로 올린다(MidpointRounding.AwayFromZero).</summary>
+        public static int KeepCount(int candidateCount, Difficulty difficulty)
+        {
+            int keep = (int)Math.Round(NoteRatio(difficulty) * candidateCount, MidpointRounding.AwayFromZero);
+            return Math.Max(0, Math.Min(candidateCount, keep));
+        }
+
         /// <summary>
-        /// 5.6: 온셋을 반박자 칸으로 정렬하고 칸당 가장 강한 온셋 하나만 노트로 만든다.
-        /// (E1 조합은 아직 구현하지 않음.)
+        /// 5.6: 온셋을 반박자 칸으로 정렬하고(리드인·끝 제외) 칸당 점수가 가장 높은 온셋 하나를 후보로 만든다.
+        /// 점수 = strength × 대역 비중 가중치. slotIndex 오름차순. 난이도 무관.
         /// </summary>
-        public static BeatMap Generate(OnsetResult o, BpmResult b, double songLength)
+        public static List<NoteCandidate> Candidates(OnsetResult o, BpmResult b, double songLength)
         {
             if (o == null) throw new ArgumentNullException(nameof(o));
             if (b == null) throw new ArgumentNullException(nameof(b));
+            var grid = new BeatMap { bpm = b.bpm, firstBeatTime = b.firstBeatTime, songLength = songLength };
+
+            double lastAllowed = songLength - GameConfig.EndEmptySec;
+            double[] bandWeight = BandWeights(o);
+            var best = new Dictionary<int, NoteCandidate>();
+            foreach (Onset onset in o.onsets)
+            {
+                int idx = grid.NearestSlot(onset.time);
+                double t = grid.SlotTime(idx);
+                if (t < GameConfig.LeadInEmptySec || t > lastAllowed) continue;
+                double score = onset.strength * bandWeight[(int)onset.band];
+                if (!best.TryGetValue(idx, out NoteCandidate cur) || score > cur.score)
+                    best[idx] = new NoteCandidate { slotIndex = idx, score = score, kind = BandToKind(onset.band) };
+            }
+
+            var list = new List<NoteCandidate>(best.Values);
+            list.Sort((x, y) => x.slotIndex.CompareTo(y.slotIndex));
+            return list;
+        }
+
+        /// <summary>
+        /// 5.6 후보 → 5.7 난이도 선별: 점수 내림차순(동점은 slotIndex 오름차순)으로 KeepCount개를 남기고
+        /// slotIndex 오름차순으로 노트를 만든다. (E1 조합은 아직 구현하지 않음.)
+        /// </summary>
+        public static BeatMap Generate(OnsetResult o, BpmResult b, double songLength, Difficulty difficulty)
+        {
+            List<NoteCandidate> candidates = Candidates(o, b, songLength);
 
             var map = new BeatMap
             {
@@ -80,37 +133,22 @@ namespace NoiseRun
                 firstBeatTime = b.firstBeatTime,
                 songLength = songLength,
                 bpmFallbackUsed = b.fallback,
+                difficulty = difficulty,
                 notes = new List<Note>(),
             };
 
-            double lastAllowed = songLength - GameConfig.EndEmptySec;
-            double[] bandWeight = BandWeights(o);
-            var strongest = new Dictionary<int, Onset>();
-            var strongestScore = new Dictionary<int, double>();
-            foreach (Onset onset in o.onsets)
+            var ranked = new List<NoteCandidate>(candidates);
+            ranked.Sort((x, y) =>
             {
-                int idx = map.NearestSlot(onset.time);
-                double t = map.SlotTime(idx);
-                if (t < GameConfig.LeadInEmptySec || t > lastAllowed) continue;
-                double score = onset.strength * bandWeight[(int)onset.band];
-                if (!strongestScore.TryGetValue(idx, out double cur) || score > cur)
-                {
-                    strongest[idx] = onset;
-                    strongestScore[idx] = score;
-                }
-            }
+                int c = y.score.CompareTo(x.score);
+                return c != 0 ? c : x.slotIndex.CompareTo(y.slotIndex);
+            });
+            int keep = KeepCount(ranked.Count, difficulty);
+            var kept = ranked.GetRange(0, keep);
+            kept.Sort((x, y) => x.slotIndex.CompareTo(y.slotIndex));
 
-            var slots = new List<int>(strongest.Keys);
-            slots.Sort();
-            foreach (int idx in slots)
-            {
-                map.notes.Add(new Note
-                {
-                    time = map.SlotTime(idx),
-                    kind = BandToKind(strongest[idx].band),
-                    slotIndex = idx,
-                });
-            }
+            foreach (NoteCandidate c in kept)
+                map.notes.Add(new Note { time = map.SlotTime(c.slotIndex), kind = c.kind, slotIndex = c.slotIndex });
             return map;
         }
 

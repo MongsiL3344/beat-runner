@@ -25,6 +25,33 @@ namespace NoiseRun
         string shownStage;
         int shownPercent = -1;
 
+        // 파일 선택·Songs 목록 화면의 난이도 줄(Difficulty 설정 때 다시 그린다)
+        Text difficultyText;
+        Difficulty difficulty = GameConfig.DefaultDifficulty;
+
+        /// <summary>파일 선택·Songs 목록 화면에 띄우는 현재 난이도. 설정하면 지금 화면의 난이도 줄만 다시 그린다.</summary>
+        public Difficulty Difficulty
+        {
+            get => difficulty;
+            set
+            {
+                difficulty = value;
+                if (difficultyText != null) difficultyText.text = DifficultyLine(difficulty);
+            }
+        }
+
+        static string DifficultyLine(Difficulty d)
+        {
+            string label;
+            switch (d)
+            {
+                case Difficulty.Easy: label = "쉬움"; break;
+                case Difficulty.Hard: label = "어려움"; break;
+                default: label = "보통"; break;
+            }
+            return "난이도: " + label + "   ←/→: 난이도";
+        }
+
         /// <summary>불러오기·분석 화면에 띄우는 곡 이름. ShowLoading/ShowAnalyzing 전에 지정한다.</summary>
         public string SongName { get; set; } = string.Empty;
 
@@ -54,6 +81,7 @@ namespace NoiseRun
             Transform root = screenRoot.transform;
             UiFactory.MakeText(root, "음악 파일 선택", GameConfig.TextSizeHeader, TextAnchor.UpperCenter, new Vector2(0f, GameConfig.UiHeaderY));
             UiFactory.MakeText(root, "Enter: 파일 선택창 열기\nF: Songs 폴더 목록", GameConfig.TextSizeHeader, TextAnchor.UpperCenter, new Vector2(0f, GameConfig.UiBodyY));
+            difficultyText = UiFactory.MakeText(root, DifficultyLine(difficulty), GameConfig.TextSizeBody, TextAnchor.UpperCenter, new Vector2(0f, GameConfig.UiSelectDifficultyY));
             MakeError(root, message);
         }
 
@@ -84,6 +112,7 @@ namespace NoiseRun
                 }
             }
 
+            difficultyText = UiFactory.MakeText(root, DifficultyLine(difficulty), GameConfig.TextSizeBody, TextAnchor.UpperCenter, new Vector2(0f, GameConfig.UiListDifficultyY));
             MakeError(root, message);
             string footer = files.Length > 0
                 ? string.Format(CultureInfo.InvariantCulture, "↑/↓: 선택 ({0}/{1})   Enter: 재생   Esc: 뒤로", selected + 1, files.Length)
@@ -174,6 +203,7 @@ namespace NoiseRun
             stageText = null;
             percentText = null;
             barFill = null;
+            difficultyText = null;
         }
 
         static void MakeError(Transform root, string message)

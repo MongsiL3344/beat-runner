@@ -54,6 +54,12 @@ namespace NoiseRun
         public const float AnalysisProgressBpmEnd = 0.95f;
         /// <summary>FFT 루프에서 진행률을 갱신하는 프레임 간격(volatile 쓰기 빈도 제한용).</summary>
         public const int AnalysisProgressFrameInterval = 64;
+        /// <summary>5.7 난이도별로 남길 후보 칸 비율.</summary>
+        public const double DifficultyNoteRatioEasy = 0.4;
+        public const double DifficultyNoteRatioNormal = 0.7;
+        public const double DifficultyNoteRatioHard = 1.0;
+        /// <summary>처음 고른 난이도(실행 중에만 유지).</summary>
+        public const Difficulty DefaultDifficulty = Difficulty.Normal;
 
         // ── 화면·이동 ──
         public const int PixelsPerUnit = 16;
@@ -62,8 +68,30 @@ namespace NoiseRun
         public static Vector2 RefResolution => new Vector2(RefWidth, RefHeight);
         /// <summary>RefHeight / (2 × PixelsPerUnit) = 270 / 32.</summary>
         public const float CameraOrthoSize = 8.4375f;
+        /// <summary>플레이 중 카메라 줌 배율(사용자 결정: 한 층에 집중, 위·아래층은 조금만 보이게). 1080p에서 8배로 정수 배율.</summary>
+        public const float CameraZoom = 0.5f;
+        /// <summary>CameraDirector.Follow가 쓰는 플레이 중 orthographicSize = CameraOrthoSize × CameraZoom.</summary>
+        public const float PlayCameraOrthoSize = CameraOrthoSize * CameraZoom;
         /// <summary>dspTime 보간 최대 선행(초).</summary>
         public const double BufferSmoothMaxLeadSec = 0.05;
+        /// <summary>x = 곡 시간 × ScrollSpeed (유닛/초).</summary>
+        public const float ScrollSpeed = 8f;
+        /// <summary>카메라 추적 시 주인공의 화면 가로 위치(0=왼쪽, 1=오른쪽).</summary>
+        public const float PlayerViewportX = 0.4f;
+        /// <summary>바닥 높이(유닛).</summary>
+        public const float FloorY = 0f;
+        /// <summary>복도 천장 높이(유닛, 48px).</summary>
+        public const float CeilingHeight = 3f;
+        /// <summary>점프 높이(유닛, 20px).</summary>
+        public const float JumpHeight = 1.25f;
+        /// <summary>동작 연출 최대 시간(초).</summary>
+        public const float ActionMaxSec = 0.35f;
+        /// <summary>반박자 대비 동작 시간 배수. 동작 시간 = min(ActionMaxSec, 반박자 × 이 값).</summary>
+        public const float ActionBeatFactor = 0.9f;
+        /// <summary>곡 끝 위치에서 비상구까지(유닛).</summary>
+        public const float ExitDistanceAfterEnd = 3f;
+        /// <summary>카운트다운 3·2·1 각 표시 시간(초). T5 임시 직행은 숫자 없이 ×3만큼 기다린다.</summary>
+        public const float CountdownStepSec = 0.7f;
 
         /// <summary>Bootstrap이 카메라를 새로 만들 때의 z 위치(2D 템플릿 기본값).</summary>
         public const float CameraZ = -10f;
@@ -164,5 +192,34 @@ namespace NoiseRun
         public static readonly Color GalleryBackgroundColor = new Color(0.5f, 0.5f, 0.5f, 1f);
         /// <summary>배경이 스프라이트 뒤에 오도록 하는 정렬 순서.</summary>
         public const int GalleryBackgroundSortingOrder = -10;
+
+        // ── 흐름·난이도 선택 화면 (T5, 480×270 기준) ──
+        /// <summary>파일 선택 첫 화면의 난이도 줄 y(윗변 기준).</summary>
+        public const float UiSelectDifficultyY = -30f;
+        /// <summary>Songs 목록 화면의 난이도 줄 y(윗변 기준). 목록 맨 아래 줄과 오류 문구 사이.</summary>
+        public const float UiListDifficultyY = -62f;
+
+        // ── 레벨·주인공·카메라 (T5) ──
+        /// <summary>그리기 순서(2.5절): 배경 0, 복도 1, 장애물 2, 이웃 3, 주인공 4, 이펙트 5.</summary>
+        public const int SortOrderBackground = 0;
+        public const int SortOrderCorridor = 1;
+        public const int SortOrderObstacle = 2;
+        public const int SortOrderChaser = 3;
+        public const int SortOrderPlayer = 4;
+        public const int SortOrderEffect = 5;
+        /// <summary>카운트다운 단계 수(3·2·1). 곡 시작 전 대기 = CountdownStepSec × CountdownSteps이고, 그동안 주인공은 x &lt; 0에서 달린다.</summary>
+        public const int CountdownSteps = 3;
+        /// <summary>곡 시간 0 이전 주인공이 달리는 거리(유닛).</summary>
+        public const float LeadInDistanceUnits = CountdownStepSec * CountdownSteps * ScrollSpeed;
+        /// <summary>복도를 시작선 왼쪽(LeadInDistanceUnits 더 왼쪽)과 비상구 오른쪽으로 더 까는 여유(유닛). 카메라가 주인공 40% 위치라 왼쪽 0.4폭·오른쪽 0.6폭이 보이므로 21:9 와이드(폭 약 39유닛)도 덮는 값.</summary>
+        public const float LevelMarginUnits = 32f;
+        /// <summary>복도 위·아래층 타일에 곱하는 색(9.3절: 어둡게).</summary>
+        public static readonly Color OtherStoryTint = new Color(0.4f, 0.4f, 0.45f, 1f);
+        /// <summary>카메라 중심 y. 복도 띠(바닥~천장)의 한가운데.</summary>
+        public const float CameraY = FloorY + CeilingHeight / 2f;
+        /// <summary>점프 곡선 y = JumpHeight × sin(π × u^지수), u = 경과/동작 시간. 1보다 작으면 빨리 솟는다(autoPlay가 노트 시각에 정확히 누르므로 그 순간 장애물 위에 떠 있어야 한다).</summary>
+        public const float JumpRiseExponent = 0.5f;
+        /// <summary>음파 이펙트의 주인공 앞 오프셋(유닛, 12px).</summary>
+        public const float WaveEffectOffsetUnits = 0.75f;
     }
 }

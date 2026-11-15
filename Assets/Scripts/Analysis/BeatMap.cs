@@ -15,6 +15,9 @@ namespace NoiseRun
     /// <summary>OffBeat = 헛박자, EmptyBeat = 격자 안·장애물 없음.</summary>
     public enum Judgement { Perfect, Good, Miss, OffBeat, EmptyBeat }
 
+    /// <summary>쉬움·보통·어려움(5.7). 난이도별로 남길 장애물 칸 비율이 다르다.</summary>
+    public enum Difficulty { Easy, Normal, Hard }
+
     /// <summary>strength = 플럭스 / 임계값(≥1).</summary>
     public struct Onset { public double time; public Band band; public float strength; }
 
@@ -40,6 +43,8 @@ namespace NoiseRun
         public double HalfBeatSec => 30.0 / bpm;
         public double songLength;
         public bool bpmFallbackUsed;
+        /// <summary>이 맵을 만든 난이도(5.7).</summary>
+        public Difficulty difficulty;
         /// <summary>시간순.</summary>
         public List<Note> notes;
         public double SlotTime(int idx) => firstBeatTime + idx * HalfBeatSec;
@@ -108,6 +113,7 @@ namespace NoiseRun
     public sealed class ResultData
     {
         public bool escaped;
+        public Difficulty difficulty;
         public int score, perfect, good, miss, maxCombo, best;
     }
 
